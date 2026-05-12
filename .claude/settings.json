@@ -1,0 +1,60 @@
+{
+  "$comment": "FocusTree 项目的沉浸式开发配置。在该目录下启动 Claude Code 时自动生效。",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(**)",
+      "Edit(**)",
+      "Write(**)",
+
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(npx *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+
+      "Bash(curl *)",
+      "Bash(python3 *)",
+      "Bash(jq *)",
+
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(echo *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(awk *)",
+      "Bash(sed *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(pwd)",
+      "Bash(date)",
+
+      "Bash(lsof *)",
+      "Bash(kill *)",
+      "Bash(pkill *)",
+      "Bash(sleep *)",
+
+      "WebFetch(domain:*)",
+      "WebSearch",
+
+      "mcp__f00fb3dd-f53e-4ba8-a1d1-6d7f44304a18__*",
+      "mcp__Claude_in_Chrome__*",
+      "mcp__computer-use__*",
+      "mcp__ccd_session__*"
+    ],
+
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(git push --force origin main*)",
+      "Bash(git push --force origin master*)",
+      "Bash(git reset --hard HEAD~*)"
+    ]
+  }
+}

@@ -1,0 +1,311 @@
+import { useState, useCallback, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
+import { flatToTree, findNodeById, collectSubtree, sortByParentFirst, sortByDepthDesc, SAMPLE_DATA } from '../lib/treeUtils'
+
+const MAX_HISTORY = 30
+
+export function useTree(user) {
+  const [treeData, setTreeData]     = useState(null)
+  const [loading, setLoading]       = useState(true)
+  const [density, setDensity]       = useState('medium')
+  const [leafView, setLeafView]     = useState(false)
+  const [history, setHistory]       = useState([])   // [{ label, undoFn }]
+
+  // ── 加载 ────────────────────────────────────────────
+
+  const loadNodes = useCallback(async () => {
+    if (!user) { setTreeData(SAMPLE_DATA); setLoading(false); return }
+    setLoading(true)
+
+    // 并发拉取 nodes + annotations
+    const [nodesResult, annResult] = await Promise.all([
+      supabase.from('nodes').select('*').eq('user_id', user.id).order('position'),
+      supabase.from('node_annotations').select('*').eq('user_id', user.id),
+    ])
+
+    const { data, error } = nodesResult
+    const annotations = annResult.data || []
+    const annMap = {}
+    annotations.forEach(a => { annMap[a.node_id] = a })
+
+    // 把 annotations 合并到 node 上
+    const enrichNodes = arr => arr.map(n => ({ ...n, annotations: annMap[n.id] || null }))
+
+    if (error) {
+      console.error(error); setTreeData(SAMPLE_DATA)
+    } else if (!data?.length) {
+      const initKey = `ft_init_${user.id}`
+      const alreadyInitialized = localStorage.getItem(initKey)
+
+      if (!alreadyInitialized) {
+        await seedSampleData(user.id)
+        localStorage.setItem(initKey, '1')
+        const { data: seeded } = await supabase
+          .from('nodes').select('*').eq('user_id', user.id).order('position')
+        setTreeData(flatToTree(enrichNodes(seeded || [])))
+      } else {
+        setTreeData(null)
+      }
+    } else {
+      localStorage.setItem(`ft_init_${user.id}`, '1')
+      setTreeData(flatToTree(enrichNodes(data)))
+    }
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => { loadNodes() }, [loadNodes])
+
+  // ── 历史工具 ─────────────────────────────────────────
+
+  const pushHistory = useCallback((label, undoFn) => {
+    setHistory(prev => [...prev.slice(-(MAX_HISTORY - 1)), { label, undoFn }])
+  }, [])
+
+  const undo = useCallback(async () => {
+    if (!history.length) return
+    const last = history[history.length - 1]
+    setHistory(prev => prev.slice(0, -1))
+    await last.undoFn()
+    await loadNodes()
+  }, [history, loadNodes])
+
+  // ── 本地展开/折叠（不写库，不记录历史）────────────────
+
+  const toggleNode  = useCallback((id) => setTreeData(prev => prev ? toggleExpanded(prev, id) : prev), [])
+  const expandAll   = useCallback(() => setTreeData(prev => prev ? setAllExpanded(prev, true)  : prev), [])
+  const collapseAll = useCallback(() => setTreeData(prev => prev ? setAllExpanded(prev, false) : prev), [])
+
+  // ── 状态变更（mark_done / mark_active / mark_dormant）──
+
+  const updateStatus = useCallback(async (nodeId, status) => {
+    if (!user) return
+    const node = findNodeById(treeData, nodeId)
+    const prevStatus = node?.status || 'active'
+    const prevCompleted = node?.completed_at || null
+
+    await supabase.from('nodes').update({
+      status,
+      completed_at: status === 'done' ? new Date().toISOString() : null,
+      last_active_at: new Date().toISOString(),
+    }).eq('id', nodeId).eq('user_id', user.id)
+
+    // 🔁 Outcome 闭环：标完成时，把对应的近期推荐回填为 completed
+    if (status === 'done') {
+      const SEVEN_DAYS_AGO = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+      const { error: outcomeErr } = await supabase
+        .from('recommendation_log')
+        .update({
+          outcome: 'completed',
+          outcome_at: new Date().toISOString(),
+          feedback: 'accepted',
+        })
+        .eq('user_id', user.id)
+        .eq('primary_node_id', nodeId)
+        .is('outcome', null)
+        .gte('created_at', SEVEN_DAYS_AGO)
+      if (outcomeErr) console.warn('[updateStatus] outcome backfill:', outcomeErr.message)
+    }
+
+    const statusLabel = { done: '完成', active: '进行中', dormant: '暂停' }
+    pushHistory(`标记「${node?.name}」为${statusLabel[status]}`, async () => {
+      await supabase.from('nodes').update({
+        status: prevStatus,
+        completed_at: prevCompleted,
+      }).eq('id', nodeId).eq('user_id', user.id)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
+  // ── 重命名 ────────────────────────────────────────────
+
+  const renameNode = useCallback(async (nodeId, newName) => {
+    if (!user || !newName?.trim()) return
+    const node = findNodeById(treeData, nodeId)
+    const prevName = node?.name || ''
+
+    await supabase.from('nodes').update({ name: newName.trim() }).eq('id', nodeId).eq('user_id', user.id)
+
+    pushHistory(`重命名「${prevName}」→「${newName}」`, async () => {
+      await supabase.from('nodes').update({ name: prevName }).eq('id', nodeId).eq('user_id', user.id)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
+  // ── 新增节点（可带 AI 自动生成的 annotations）────────
+
+  const addNode = useCallback(async ({ name, type, parentId, color, annotations }) => {
+    if (!user) return
+    const { data, error: insertErr } = await supabase.from('nodes').insert({
+      user_id: user.id,
+      parent_id: parentId || null,
+      name: name.trim(),
+      type, color: color || null,
+      status: 'active', weight: 1.0,
+      expanded: true, position: Date.now(),
+      last_active_at: new Date().toISOString(),
+    }).select('id').single()
+
+    if (insertErr) {
+      console.error('[addNode] insert failed:', insertErr)
+      alert(`创建失败：${insertErr.message}`)
+      return null
+    }
+
+    let newId = null
+    if (data?.id) {
+      newId = data.id
+
+      // 若 AI 提供了 annotations，写入 node_annotations
+      if (annotations && Object.keys(annotations).length) {
+        const { error: annErr } = await supabase.from('node_annotations').insert({
+          node_id: newId,
+          user_id: user.id,
+          roi_type:      annotations.roi_type      || null,
+          time_horizon:  annotations.time_horizon  || null,
+          energy_cost:   annotations.energy_cost   || null,
+          feasibility:   annotations.feasibility   ?? null,
+          risk:          annotations.risk          || null,
+          strategic_tag: annotations.strategic_tag || null,
+          ai_notes:      annotations.ai_notes      || null,
+        })
+        if (annErr) console.warn('[addNode] annotations write:', annErr.message)
+      }
+
+      pushHistory(`添加「${name}」`, async () => {
+        await supabase.from('nodes').delete().eq('id', newId).eq('user_id', user.id)
+      })
+    }
+
+    await loadNodes()
+    return newId
+  }, [user, loadNodes, pushHistory])
+
+  // ── 给已有节点打/改策略标签 ──────────────────────────
+
+  const annotateNode = useCallback(async (nodeId, annotations) => {
+    if (!user || !nodeId || !annotations) return
+    const { error } = await supabase.from('node_annotations').upsert({
+      node_id: nodeId,
+      user_id: user.id,
+      roi_type:      annotations.roi_type      || null,
+      time_horizon:  annotations.time_horizon  || null,
+      energy_cost:   annotations.energy_cost   || null,
+      feasibility:   annotations.feasibility   ?? null,
+      risk:          annotations.risk          || null,
+      strategic_tag: annotations.strategic_tag || null,
+      ai_notes:      annotations.ai_notes      || null,
+    }, { onConflict: 'node_id' })
+    if (error) console.warn('[annotateNode]', error.message)
+    await loadNodes()
+  }, [user, loadNodes])
+
+  // ── 删除节点（级联删除子节点）────────────────────────
+
+  const deleteNode = useCallback(async (nodeId) => {
+    if (!user) return
+    const snapshot = collectSubtree(treeData, nodeId)
+    const nodeName = snapshot[0]?.name || nodeId
+
+    // 从最深子节点开始删，避免 FK 约束报错
+    const sorted = sortByDepthDesc(snapshot)
+    for (const n of sorted) {
+      const { error } = await supabase.from('nodes').delete()
+        .eq('id', n.id).eq('user_id', user.id)
+      if (error) console.error('[deleteNode]', n.name, error.message)
+    }
+
+    pushHistory(`删除「${nodeName}」`, async () => {
+      const toInsert = sortByParentFirst(snapshot).map(({ children, ...n }) => n)
+      await supabase.from('nodes').insert(toInsert)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
+  // ── 清空所有（clear_all）─────────────────────────────
+
+  const clearAll = useCallback(async () => {
+    if (!user) return
+    const { data: allNodes, error: fetchErr } = await supabase
+      .from('nodes').select('*').eq('user_id', user.id)
+
+    if (fetchErr) { console.error('[clearAll] fetch:', fetchErr.message); return }
+    if (!allNodes?.length) return
+
+    // 从最深子节点开始删，避免父节点被先删时 FK 报错
+    const sorted = sortByDepthDesc(allNodes)
+    for (const n of sorted) {
+      const { error } = await supabase.from('nodes').delete()
+        .eq('id', n.id).eq('user_id', user.id)
+      if (error) console.error('[clearAll] delete', n.name, ':', error.message)
+    }
+
+    pushHistory('清空所有项目', async () => {
+      const toInsert = sortByParentFirst(allNodes).map(({ children, ...n }) => n)
+      const { error } = await supabase.from('nodes').insert(toInsert)
+      if (error) console.error('[clearAll] undo:', error.message)
+    })
+
+    await loadNodes()
+  }, [user, loadNodes, pushHistory])
+
+  // ── 权重更新 ──────────────────────────────────────────
+
+  const updateWeight = useCallback(async (nodeId, weight) => {
+    if (!user) return
+    const node = findNodeById(treeData, nodeId)
+    const prevWeight = node?.weight ?? 1.0
+
+    await supabase.from('nodes').update({ weight }).eq('id', nodeId).eq('user_id', user.id)
+
+    pushHistory(`调整「${node?.name}」权重`, async () => {
+      await supabase.from('nodes').update({ weight: prevWeight }).eq('id', nodeId).eq('user_id', user.id)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
+  return {
+    treeData, loading, density, setDensity, leafView, setLeafView,
+    expandAll, collapseAll, toggleNode,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight,
+    annotateNode,
+    reload: loadNodes,
+    // 历史
+    history,
+    canUndo: history.length > 0,
+    lastAction: history[history.length - 1]?.label || null,
+    undo,
+  }
+}
+
+// ── 本地树操作 ────────────────────────────────────────
+
+function setAllExpanded(node, value) {
+  return { ...node, expanded: value, children: node.children?.map(c => setAllExpanded(c, value)) }
+}
+function toggleExpanded(node, id) {
+  if (node.id === id) return { ...node, expanded: !node.expanded }
+  return { ...node, children: node.children?.map(c => toggleExpanded(c, id)) }
+}
+
+// ── 新用户示例数据 ────────────────────────────────────
+
+async function seedSampleData(userId) {
+  const now = new Date().toISOString()
+
+  // 新用户只创建一个示例项目作为引导，保持界面干净
+  const { data: projects } = await supabase.from('nodes').insert([
+    { user_id: userId, name: '我的第一个项目', type: 'project', color: '#4A8C5C', weight: 1.0, status: 'active', position: 1, expanded: true, last_active_at: now },
+  ]).select('id')
+
+  if (!projects?.[0]) return
+  const p1 = projects[0].id
+
+  await supabase.from('nodes').insert([
+    { user_id: userId, parent_id: p1, name: '点击右键可以添加子任务', type: 'task', status: 'active', weight: 0.8, position: 1, expanded: true, last_active_at: now },
+    { user_id: userId, parent_id: p1, name: '告诉 AI「我完成了 XX」它会帮你更新', type: 'task', status: 'active', weight: 0.6, position: 2, expanded: true, last_active_at: now },
+  ])
+}
