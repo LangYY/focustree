@@ -53,7 +53,7 @@ export default function AuthPage() {
       >
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🌳</div>
+          <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>FT</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#e5e7eb' }}>专注树</div>
           <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>你的外置大脑</div>
         </div>

@@ -34,14 +34,26 @@ export default function App() {
     localStorage.setItem('ft_model', next)
   }, [])
 
+  const lastUserIdRef = useRef(null)
+
   // ── Auth ────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+      const nextUser = session?.user ?? null
+      const nextId = nextUser?.id ?? null
+      if (lastUserIdRef.current === nextId) return
+      lastUserIdRef.current = nextId
+      setUser(nextUser)
       setAuthLoading(false)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // TOKEN_REFRESHED / INITIAL_SESSION 不改变用户身份，跳过
+      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return
+      const nextUser = session?.user ?? null
+      const nextId = nextUser?.id ?? null
+      if (lastUserIdRef.current === nextId) return
+      lastUserIdRef.current = nextId
+      setUser(nextUser)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -51,7 +63,7 @@ export default function App() {
     density, setDensity,
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateWeight, moveNode,
     history, canUndo, lastAction, undo,
   } = useTree(user)
 
@@ -62,6 +74,7 @@ export default function App() {
   const treeActions = { addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
+    retryLastMessage, cancelRequest, pendingQueue,
     sessionId, sessions, deleteSession, fetchSessionMessages,
     learnedPatterns, removeLearnedPattern,
     recommendations, hitRate, reloadRecommendations,
@@ -91,6 +104,14 @@ export default function App() {
     if (action === 'status') {
       await updateStatus(node.id, status)
     }
+    if (action === 'weight') {
+      const current = Math.round((node.weight ?? 1) * 100)
+      const input = window.prompt(`调整「${node.name}」的权重 (0-100)：`, current)
+      if (input !== null) {
+        const w = Math.max(0, Math.min(100, parseInt(input) || 0))
+        await updateWeight(node.id, w / 100)
+      }
+    }
     if (action === 'delete') {
       const hasChildren = node.children?.length > 0
       const msg = hasChildren
@@ -100,12 +121,17 @@ export default function App() {
         await deleteNode(node.id)
       }
     }
-  }, [renameNode, updateStatus, deleteNode])
+  }, [renameNode, updateStatus, deleteNode, updateWeight])
 
   // ── 新建节点 ────────────────────────────────────────
   const handleAddNode = useCallback(async ({ name, type, color, parentId }) => {
     await addNode({ name, type, color, parentId })
   }, [addNode])
+
+  // ── 拖拽分支 ────────────────────────────────────────
+  const handleDropBranch = useCallback(async (source, target) => {
+    await moveNode(source.id, target.id)
+  }, [moveNode])
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -182,10 +208,13 @@ export default function App() {
               <TreeView
                 treeData={treeData}
                 density={density}
-                onNodeClick={node => toggleNode(node.id)}
+                onNodeSelect={node => setHighlightedNodeId(node.id)}
+                onNodeToggle={node => toggleNode(node.id)}
                 onContextAction={handleContextAction}
                 resetZoomRef={resetZoomRef}
                 highlightedNodeId={highlightedNodeId}
+                onLeafAdd={(node, childType) => setModal({ parentNode: node, defaultType: childType })}
+                onDropBranch={handleDropBranch}
               />
             </>
           )}
@@ -212,6 +241,9 @@ export default function App() {
           onHoverNode={setHighlightedNodeId}
           onTriggerReview={() => weeklyReview.generate({ silent: false })}
           reviewGenerating={weeklyReview.generating}
+          onRetry={() => retryLastMessage(treeData)}
+          onCancel={cancelRequest}
+          pendingCount={pendingQueue.length}
         />
       </div>
 

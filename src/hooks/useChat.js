@@ -6,7 +6,7 @@ import { getClientTime } from '../lib/clientTime'
 const WELCOME = {
   id: 'welcome',
   role: 'assistant',
-  content: '你好！我是你的专注树助理。\n\n你可以说：\n· 「现在该做什么？」\n· 「第2集脚本写完了」\n· 「在熊猫团团下加任务：剪辑第1集」\n· 「把求职项目暂停」\n\n我会直接帮你更新树。',
+  content: '你好，我是你的专注树助理。说说现在想做什么？',
 }
 
 // Session 划分阈值：超过这个间隔没说话，开新 session
@@ -31,6 +31,14 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   const [sessionId, setSessionId] = useState(null)
   // 用 ref 存最近一条消息时间，方便 sendMessage 里同步判断 gap
   const lastMsgTimeRef = useRef(0)
+  // 保存最后一条用户消息，失败后可重试
+  const lastUserMessageRef = useRef('')
+  // 防竞态：initSession 异步调用序号，只取最新一次的结果
+  const initGenRef = useRef(0)
+  // 取消在途请求
+  const abortRef = useRef(null)
+  // 消息队列：AI 处理中用户提交的新消息暂存于此
+  const [pendingQueue, setPendingQueue] = useState([])
 
   // 摘要 + 学习模式：注入 agent 用
   const [recentSummaries, setRecentSummaries] = useState([])
@@ -52,47 +60,50 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       setSessions([])
       return
     }
-    initSession()
+    const gen = ++initGenRef.current
+    initSession(gen)
     loadRecentSummaries()
     loadLearnedPatterns()
     loadSessionsList()
     loadRecommendations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user?.id])
 
-  async function initSession() {
-    // 找用户最近一条消息：< 30 分钟则续上，否则开新 session
-    const { data: latest } = await supabase
+  async function initSession(gen) {
+    // 始终恢复最近一个 session，不在此处做 gap 切分
+    // gap 切分只在用户主动发消息时（sendMessage）触发
+    const { data: latest, error: err1 } = await supabase
       .from('conversations')
       .select('session_id, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
 
-    let activeSession
-    if (latest?.length && latest[0].session_id) {
-      const ageMs = Date.now() - new Date(latest[0].created_at).getTime()
-      if (ageMs < SESSION_GAP_MS) {
-        activeSession = latest[0].session_id
-      } else {
-        activeSession = uuid()
-        // 顺手触发对上一个 session 的摘要（如果还没摘要）
-        fireSummarize(latest[0].session_id)
-      }
-    } else {
-      activeSession = uuid()
+    if (gen !== initGenRef.current) return
+    if (err1) {
+      console.warn('[initSession] query latest failed, keeping current state:', err1.message)
+      return
     }
+
+    const activeSession = (latest?.length && latest[0].session_id)
+      ? latest[0].session_id
+      : uuid()
     setSessionId(activeSession)
     lastMsgTimeRef.current = latest?.[0]?.created_at ? new Date(latest[0].created_at).getTime() : 0
 
     // 加载本 session 的消息
-    const { data } = await supabase
+    const { data, error: err2 } = await supabase
       .from('conversations')
       .select('*')
       .eq('user_id', user.id)
       .eq('session_id', activeSession)
       .order('created_at', { ascending: true })
       .limit(50)
+
+    if (gen !== initGenRef.current) return
+    if (err2) {
+      console.warn('[initSession] query messages failed, keeping current state:', err2.message)
+      return
+    }
 
     if (data?.length) {
       setMessages([
@@ -222,6 +233,12 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   // ── 发消息 ───────────────────────────────────────────────
 
   const sendMessage = useCallback(async (content, treeData) => {
+    // 若 AI 正在处理，将消息加入队列
+    if (isLoading) {
+      setPendingQueue(prev => [...prev, content])
+      return
+    }
+
     // gap 检测：如果距上次消息 > 阈值，开新 session，并触发对旧 session 的摘要
     let activeSession = sessionId
     const now = Date.now()
@@ -235,11 +252,16 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     lastMsgTimeRef.current = now
 
     const userMsg = { id: uuid(), role: 'user', content }
+    lastUserMessageRef.current = content
     setMessages(prev => [...prev, userMsg])
     setIsLoading(true)
 
+    // 创建取消控制器
+    const controller = new AbortController()
+    abortRef.current = controller
+
     if (user) {
-      supabase.from('conversations').insert({
+      await supabase.from('conversations').insert({
         user_id: user.id, role: 'user', content,
         session_id: activeSession,
       })
@@ -251,22 +273,41 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         ? flattenTree(treeData).map(n => n.id).filter(Boolean)
         : []
 
-      // 当前 session 内的近期对话（已经过滤）
-      const history = sanitizeHistoryPairs(
-        messages.filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
-      )
+      // 当前 session 内的近期对话（服务端会做 sanitize，这里只传原始消息）
+      const history = messages
+        .filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
+        .slice(-10)
 
       const result = await callAgent({
         content, treeText, nodeIds, history, userGoal, model,
         recentSummaries, learnedPatterns, hitRate,
         clientTime: getClientTime(),
+        signal: controller.signal,
       })
-      const { reply, actions, thinking, model_used } = result
+      const { reply, actions, thinking, model_used, error, aborted } = result
+
+      // 用户主动停止，静默退出
+      if (aborted) return
 
       // 执行树操作 + 记忆 action
       const newIdByName = {}
-      const actionLogs = []
       const learnedToAdd = []
+
+      // 清空操作需用户二次确认
+      if (actions?.some(a => a.type === 'clear_all')) {
+        if (!window.confirm('确定要清空所有项目吗？此操作可撤销。')) {
+          // 用户取消：跳过所有操作，只保留 AI 的消息提示
+          const cancelMsg = {
+            id: uuid(),
+            role: 'assistant',
+            content: '已取消清空操作。',
+          }
+          setMessages(prev => [...prev, cancelMsg])
+          setIsLoading(false)
+          abortRef.current = null
+          return
+        }
+      }
 
       if (actions?.length) {
         for (const action of actions) {
@@ -283,13 +324,11 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
               created_at: new Date().toISOString(),
               source_session: activeSession,
             })
-            actionLogs.push(`记住了：${action.observation}`)
             continue
           }
 
           if (!treeActions) continue
           const r = await executeAction(action, treeActions)
-          if (r?.log)   actionLogs.push(r.log)
           if (r?.newId && action.name) newIdByName[action.name] = r.newId
         }
       }
@@ -303,22 +342,19 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         }, { onConflict: 'user_id' })
       }
 
-      const fullReply = actionLogs.length
-        ? `${reply}\n\n${actionLogs.map(l => `✅ ${l}`).join('\n')}`
-        : reply
-
       const assistantMsg = {
         id: uuid(),
         role: 'assistant',
-        content: fullReply,
+        content: reply,
         thinking: thinking || null,
         model_used: model_used || null,
+        isError: !!error,
       }
       setMessages(prev => [...prev, assistantMsg])
 
       if (user) {
-        supabase.from('conversations').insert({
-          user_id: user.id, role: 'assistant', content: fullReply,
+        await supabase.from('conversations').insert({
+          user_id: user.id, role: 'assistant', content: reply,
           session_id: activeSession,
         })
 
@@ -334,7 +370,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
             message: content,
             goal_snapshot: userGoal || null,
             thinking,
-            reply: fullReply,
+            reply: reply,
             primary_node_id: primary,
             alternative_node_ids: alternatives.length ? alternatives : null,
           }).then(() => {
@@ -344,16 +380,30 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         }
       }
     } catch (err) {
+      if (err.name === 'AbortError') return  // 用户主动停止
       console.error('[useChat]', err)
       setMessages(prev => [...prev, {
         id: uuid(),
         role: 'assistant',
         content: '抱歉，出了点问题，请稍后再试。',
+        isError: true,
       }])
     } finally {
-      setIsLoading(false)
+      abortRef.current = null
+      // 处理队列中的下一条消息
+      setPendingQueue(prev => {
+        if (prev.length > 0) {
+          const next = prev[0]
+          const rest = prev.slice(1)
+          // 延迟一 tick 保证 state 更新
+          setTimeout(() => sendMessage(next, treeData), 0)
+          return rest
+        }
+        setIsLoading(false)
+        return prev
+      })
     }
-  }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate])
+  }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading])
 
   /**
    * 清空当前 session 的对话（DB 中保留旧 session 历史，可在历史面板查阅）
@@ -427,8 +477,29 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     // 不写到 conversations，避免污染普通对话流
   }, [])
 
+  /**
+   * 取消当前请求并清空队列
+   */
+  const cancelRequest = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setPendingQueue([])
+    setIsLoading(false)
+  }, [])
+
+  /**
+   * 重试最后一条用户消息
+   */
+  const retryLastMessage = useCallback(async (treeData) => {
+    const content = lastUserMessageRef.current
+    if (!content || isLoading) return
+    await sendMessage(content, treeData)
+  }, [sendMessage, isLoading])
+
   return {
     messages, isLoading, sendMessage,
+    retryLastMessage,
+    cancelRequest, pendingQueue,
     resetConversation,
     // session 管理
     sessionId, sessions,
@@ -444,42 +515,11 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   }
 }
 
-/**
- * 配对过滤历史消息（防 AI 自我污染）
- */
-const STALE_PATTERNS = [
-  /已清空(项目)?树/, /已清空所有项目/, /(现在)?是一张白纸/,
-  /树已经?清空/, /没有任何项目了?/, /项目树已清空/, /已删除全部/,
-]
-const DECO_PREFIXES = ['✅', '🎯', '⚠️']
-
-function sanitizeHistoryPairs(arr) {
-  const out = []
-  for (const m of arr) {
-    if (m.role === 'assistant') {
-      if (STALE_PATTERNS.some(re => re.test(m.content))) {
-        if (out.length && out[out.length - 1].role === 'user') out.pop()
-        continue
-      }
-      const stripped = m.content
-        .split('\n')
-        .filter(line => !DECO_PREFIXES.some(p => line.trim().startsWith(p)))
-        .join('\n').trim()
-      if (!stripped) {
-        if (out.length && out[out.length - 1].role === 'user') out.pop()
-        continue
-      }
-      out.push({ role: 'assistant', content: stripped })
-    } else {
-      out.push({ role: m.role, content: m.content })
-    }
-  }
-  return out.slice(-6)
-}
+// 客户端不再做 sanitize——服务端 agent.js 已统一处理配对过滤和装饰行剥离
 
 // ── 调用服务端 Agent ──────────────────────────────────
 
-async function callAgent({ content, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, hitRate, clientTime }) {
+async function callAgent({ content, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, hitRate, clientTime, signal }) {
   const res = await fetch('/api/agent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -492,6 +532,7 @@ async function callAgent({ content, treeText, nodeIds, history, userGoal, model,
       hitRate,
       clientTime,
     }),
+    signal,
   })
   if (!res.ok) throw new Error(`Agent request failed: ${res.status}`)
   return res.json()
@@ -530,6 +571,7 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'project', color: action.color || '#4A8C5C',
           annotations: action.annotations,
+          weight: action.weight,
         })
         return { log: `已创建项目「${action.name}」`, newId }
       }

@@ -158,7 +158,8 @@ export function treeToPromptText(tree) {
     if (node.type === 'root') { node.children?.forEach(c => walk(c, 0)); return }
     const indent = '  '.repeat(depth)
     const icon   = STATUS[node.status] || '▶'
-    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id})${annoTag(node)}`)
+    const wPct = Math.round((node.weight ?? 1) * 100)
+    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} w:${wPct}%)${annoTag(node)}`)
     node.children?.forEach(c => walk(c, depth + 1))
   }
   walk(tree, 0)

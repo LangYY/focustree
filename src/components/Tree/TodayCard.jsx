@@ -1,12 +1,12 @@
 import { useState } from 'react'
 
 const TIER_STYLES = {
-  '早上':  { color: 'text-amber-300',   bg: 'bg-amber-950/30',   icon: '🌅' },
-  '中午':  { color: 'text-orange-300',  bg: 'bg-orange-950/30',  icon: '🌞' },
-  '下午':  { color: 'text-sky-300',     bg: 'bg-sky-950/30',     icon: '🪑' },
-  '傍晚':  { color: 'text-rose-300',    bg: 'bg-rose-950/30',    icon: '🌇' },
-  '晚上':  { color: 'text-indigo-300',  bg: 'bg-indigo-950/30',  icon: '🌙' },
-  '任意':  { color: 'text-gray-300',    bg: 'bg-gray-800/40',    icon: '•'  },
+  '早上':  { color: 'text-amber-300',   bg: 'bg-amber-950/30',   icon: 'AM' },
+  '中午':  { color: 'text-orange-300',  bg: 'bg-orange-950/30',  icon: 'NOON' },
+  '下午':  { color: 'text-sky-300',     bg: 'bg-sky-950/30',     icon: 'PM' },
+  '傍晚':  { color: 'text-rose-300',    bg: 'bg-rose-950/30',    icon: 'EVE' },
+  '晚上':  { color: 'text-indigo-300',  bg: 'bg-indigo-950/30',  icon: 'NITE' },
+  '任意':  { color: 'text-gray-300',    bg: 'bg-gray-800/40',    icon: 'ANY' },
 }
 
 /**
@@ -26,11 +26,11 @@ export default function TodayCard({
   // 未生成今天的聚焦
   if (!focus) {
     return (
-      <div className="absolute top-3 left-3 right-3 z-10 max-w-xl mx-auto bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm">
+      <div className="absolute top-3 left-3 right-3 z-10 max-w-xl mx-auto pointer-events-none">
         <button
           onClick={onGenerate}
           disabled={generating}
-          className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-gray-800/40 transition-colors rounded-xl disabled:opacity-60"
+          className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-gray-800/40 transition-colors rounded-xl disabled:opacity-60 bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto"
         >
           <div>
             <div className="text-xs text-gray-500 uppercase tracking-wider">今日聚焦</div>
@@ -49,7 +49,8 @@ export default function TodayCard({
   const total = tasks.length
 
   return (
-    <div className="absolute top-3 left-3 right-3 z-10 max-w-2xl mx-auto bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm">
+    <div className="absolute top-3 left-3 right-3 z-10 max-w-2xl mx-auto pointer-events-none">
+      <div className="bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto">
       {/* Header */}
       <div className="px-4 py-2 flex items-center justify-between border-b border-gray-800">
         <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 text-left flex-1">
@@ -139,6 +140,7 @@ export default function TodayCard({
           })}
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -19,7 +19,7 @@ export default function Toolbar({
     >
       {/* 左：Logo + 新项目 */}
       <div className="flex items-center gap-3">
-        <span className="font-semibold text-sm text-gray-100 tracking-wide">🌳 专注树</span>
+        <span className="font-semibold text-sm text-gray-100 tracking-wide">专注树</span>
         <button
           onClick={onAddProject}
           className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 hover:border-gray-500 px-2 py-1 rounded-lg transition-colors"

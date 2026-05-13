@@ -49,7 +49,7 @@ export default function ChatHistoryPanel({
               一段没说话超过 30 分钟就开新对话。共 {sessions.length} 段
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">关闭 ✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">关闭 [x]</button>
         </div>
 
         {/* Sessions list */}

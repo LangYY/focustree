@@ -8,7 +8,7 @@ import { generateWeeklyReview } from './weeklyReview.js'
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '1mb' }))
 
 const API_KEY  = process.env.DEEPSEEK_API_KEY
 const SUPA_URL = process.env.SUPABASE_URL
@@ -37,6 +37,16 @@ app.post('/api/agent', async (req, res) => {
   console.log('hitRate:', hitRate ? `${hitRate.completed}/${hitRate.total}` : '(none)')
   console.log('nodeIds:', nodeIds?.length || 0, 'ids')
 
+  const controller = new AbortController()
+
+  // 客户端断开连接（停止按钮/关标签页）时取消 LLM 调用
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      console.log('[/api/agent] client disconnected, aborting')
+      controller.abort()
+    }
+  })
+
   try {
     const nodeIdSet = new Set(nodeIds || [])
     const result = await runAgent({
@@ -51,15 +61,20 @@ app.post('/api/agent', async (req, res) => {
       clientTime: clientTime || null,
       model:    model || 'auto',
       apiKey:   API_KEY,
+      signal:   controller.signal,
     })
-    res.json(result)
+    if (!controller.signal.aborted) {
+      res.json(result)
+    }
   } catch (err) {
     console.error('[/api/agent] error:', err)
-    res.status(500).json({
-      intent:  'query',
-      reply:   '服务暂时出现问题，请稍后再试。',
-      actions: [],
-    })
+    if (!controller.signal.aborted) {
+      res.status(500).json({
+        intent:  'query',
+        reply:   '服务暂时出现问题，请稍后再试。',
+        actions: [],
+      })
+    }
   }
 })
 

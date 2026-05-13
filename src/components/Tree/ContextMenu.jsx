@@ -72,17 +72,24 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
         {/* 暂停（只对 active 节点） */}
         {node.status === 'active' && (
           <MenuItem
-            icon="⏸"
+            icon="||"
             label="标记为暂停"
             onClick={() => { onAction('status', { node, status: 'dormant' }); onClose() }}
           />
         )}
 
+        {/* 调整权重 */}
+        <MenuItem
+          icon="W"
+          label={`调整权重 (${Math.round((node.weight ?? 1) * 100)}%)`}
+          onClick={() => { onAction('weight', { node }); onClose() }}
+        />
+
         <div className="border-t border-gray-800 my-1" />
 
         {/* 删除 */}
         <MenuItem
-          icon="🗑"
+          icon="DEL"
           label="删除"
           danger
           onClick={() => { onAction('delete', { node }); onClose() }}

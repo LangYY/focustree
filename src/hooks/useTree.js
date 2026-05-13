@@ -4,6 +4,13 @@ import { flatToTree, findNodeById, collectSubtree, sortByParentFirst, sortByDept
 
 const MAX_HISTORY = 30
 
+function stripRuntimeNodeFields(node) {
+  const raw = { ...node }
+  delete raw.children
+  delete raw.annotations
+  return raw
+}
+
 export function useTree(user) {
   const [treeData, setTreeData]     = useState(null)
   const [loading, setLoading]       = useState(true)
@@ -135,14 +142,15 @@ export function useTree(user) {
 
   // ── 新增节点（可带 AI 自动生成的 annotations）────────
 
-  const addNode = useCallback(async ({ name, type, parentId, color, annotations }) => {
+  const addNode = useCallback(async ({ name, type, parentId, color, annotations, weight }) => {
     if (!user) return
+    const nodeWeight = typeof weight === 'number' ? Math.max(0, Math.min(2, weight)) : 1.0
     const { data, error: insertErr } = await supabase.from('nodes').insert({
       user_id: user.id,
       parent_id: parentId || null,
       name: name.trim(),
       type, color: color || null,
-      status: 'active', weight: 1.0,
+      status: 'active', weight: nodeWeight,
       expanded: true, position: Date.now(),
       last_active_at: new Date().toISOString(),
     }).select('id').single()
@@ -217,8 +225,51 @@ export function useTree(user) {
     }
 
     pushHistory(`删除「${nodeName}」`, async () => {
-      const toInsert = sortByParentFirst(snapshot).map(({ children, ...n }) => n)
+      const toInsert = sortByParentFirst(snapshot).map(stripRuntimeNodeFields)
       await supabase.from('nodes').insert(toInsert)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
+  // ── 移动节点到另一父节点 ──────────────────────────────
+
+  const moveNode = useCallback(async (nodeId, targetParentId) => {
+    if (!user || !nodeId || !targetParentId || nodeId === targetParentId) return
+
+    const node = findNodeById(treeData, nodeId)
+    if (!node) return
+
+    // 环形引用检测：目标不能是源的子孙
+    const isDescendant = (parent, childId) => {
+      if (!parent.children) return false
+      for (const c of parent.children) {
+        if (c.id === childId || isDescendant(c, childId)) return true
+      }
+      return false
+    }
+    if (isDescendant(node, targetParentId)) {
+      alert('不能将节点移动到其子节点下')
+      return
+    }
+
+    const prevParentId = node.parent_id || null
+    if (prevParentId === targetParentId) return
+
+    const { error } = await supabase
+      .from('nodes')
+      .update({ parent_id: targetParentId })
+      .eq('id', nodeId)
+      .eq('user_id', user.id)
+
+    if (error) {
+      console.error('[moveNode]', error.message)
+      alert(`移动失败：${error.message}`)
+      return
+    }
+
+    pushHistory(`移动「${node.name}」`, async () => {
+      await supabase.from('nodes').update({ parent_id: prevParentId }).eq('id', nodeId).eq('user_id', user.id)
     })
 
     await loadNodes()
@@ -243,7 +294,7 @@ export function useTree(user) {
     }
 
     pushHistory('清空所有项目', async () => {
-      const toInsert = sortByParentFirst(allNodes).map(({ children, ...n }) => n)
+      const toInsert = sortByParentFirst(allNodes).map(stripRuntimeNodeFields)
       const { error } = await supabase.from('nodes').insert(toInsert)
       if (error) console.error('[clearAll] undo:', error.message)
     })
@@ -270,7 +321,7 @@ export function useTree(user) {
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight, moveNode,
     annotateNode,
     reload: loadNodes,
     // 历史

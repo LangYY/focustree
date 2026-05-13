@@ -4,7 +4,7 @@ import { findNodeById } from '../../lib/treeUtils'
 /**
  * 推荐记录面板
  *  - 显示近 30 天 AI 给出过的推荐
- *  - 每条标注：✅ 已完成 / ⏳ 待办 / 💨 流产
+ *  - 每条标注：[done] 已完成 / [pending] 待办 / [drop] 流产
  *  - 顶部命中率 badge
  *  - 单条展开可看完整 thinking
  */
@@ -45,16 +45,16 @@ export default function RecommendationLogPanel({
                   命中率 <span className="text-emerald-400 text-base font-semibold">{rate}%</span>
                 </span>
                 <span className="text-gray-600">·</span>
-                <span className="text-emerald-400">✅ {completed} 完成</span>
+                <span className="text-emerald-400">[done] {completed} 完成</span>
                 <span className="text-gray-600">·</span>
-                <span className="text-gray-400">⏳ {pending} 待办</span>
+                <span className="text-gray-400">[-] {pending} 待办</span>
                 <span className="text-gray-600">·</span>
-                <span className="text-rose-400">💨 {dropped} 流产</span>
+                <span className="text-rose-400">[drop] {dropped} 流产</span>
               </div>
             )}
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm ml-3 flex-shrink-0">
-            关闭 ✕
+            关闭 [x]
           </button>
         </div>
 
@@ -84,9 +84,9 @@ export default function RecommendationLogPanel({
 function RecItem({ rec, treeData, isOpen, onToggle }) {
   const outcomeBadge = useMemo(() => {
     const o = rec.derived_outcome
-    if (o === 'completed') return { label: '✅ 已完成', cls: 'text-emerald-400 bg-emerald-900/30' }
-    if (o === 'dropped')   return { label: '💨 流产',    cls: 'text-rose-400 bg-rose-900/30' }
-    return                        { label: '⏳ 待办',   cls: 'text-gray-400 bg-gray-800/60' }
+    if (o === 'completed') return { label: '[done] 已完成', cls: 'text-emerald-400 bg-emerald-900/30' }
+    if (o === 'dropped')   return { label: '[drop] 流产',    cls: 'text-rose-400 bg-rose-900/30' }
+    return                        { label: '[-] 待办',   cls: 'text-gray-400 bg-gray-800/60' }
   }, [rec.derived_outcome])
 
   const primaryNode = rec.primary_node_id && treeData
@@ -121,7 +121,7 @@ function RecItem({ rec, treeData, isOpen, onToggle }) {
             </div>
           )}
         </div>
-        <span className="text-[11px] text-gray-500 mt-1">{isOpen ? '▾' : '▸'}</span>
+        <span className="text-[11px] text-gray-500 mt-1">{isOpen ? '[-]' : '[+]'}</span>
       </button>
 
       {isOpen && (

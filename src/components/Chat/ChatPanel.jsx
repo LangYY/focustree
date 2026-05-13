@@ -24,7 +24,7 @@ function parseTaskRefs(line, nameToId) {
 }
 
 /**
- * 把回复内容里的 ✅ / 🎯 / ⚠️ 行渲染成 badge；任务名「xxx」做成可悬浮高亮
+ * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
 function MessageContent({ content, nameToId, onHoverNode }) {
   const lines = content.split('\n')
@@ -54,13 +54,13 @@ function MessageContent({ content, nameToId, onHoverNode }) {
   return (
     <div className="whitespace-pre-wrap">
       {lines.map((line, i) => {
-        if (line.startsWith('✅')) {
+        if (line.startsWith('[OK]') || line.startsWith('✅')) {
           return renderLine(line, i, 'mt-1.5 text-xs text-green-400 bg-green-900/30 rounded-lg px-2 py-1')
         }
-        if (line.startsWith('🎯')) {
+        if (line.startsWith('[目标]') || line.startsWith('🎯')) {
           return renderLine(line, i, 'mt-1.5 text-xs text-emerald-300 bg-emerald-900/30 rounded-lg px-2 py-1')
         }
-        if (line.startsWith('⚠️')) {
+        if (line.startsWith('[-]') || line.startsWith('⚠️')) {
           return renderLine(line, i, 'mt-1.5 text-xs text-amber-300 bg-amber-900/30 rounded-lg px-2 py-1')
         }
         return renderLine(line, i, '')
@@ -87,7 +87,7 @@ function ThinkingCard({ thinking }) {
         onClick={() => setOpen(o => !o)}
         className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
       >
-        {open ? '▾' : '▸'} 为什么这样推荐
+        {open ? '[-]' : '[+]'} 为什么这样推荐
       </button>
       {open && (
         <div className="mt-1.5 p-2.5 bg-gray-950/60 border border-gray-800 rounded-lg space-y-2 text-[11px] leading-relaxed">
@@ -158,7 +158,7 @@ function GoalBanner({ goalText, goalExpired, onEdit, onClear }) {
     <div className="px-3 py-2 bg-emerald-950/40 border-b border-emerald-900/40 group">
       <div className="flex items-center justify-between">
         <div className="text-[10px] text-emerald-500 uppercase tracking-wider">
-          🎯 当前阶段目标 {goalExpired && <span className="text-amber-400">· 已过期</span>}
+          当前阶段目标 {goalExpired && <span className="text-amber-400">· 已过期</span>}
         </div>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
           <button onClick={onEdit}  className="text-[10px] text-gray-400 hover:text-gray-200">改</button>
@@ -185,6 +185,8 @@ export default function ChatPanel({
   hitRate,
   treeData, onHoverNode,
   onTriggerReview, reviewGenerating,
+  onRetry,
+  onCancel, pendingCount,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -288,7 +290,7 @@ export default function ChatPanel({
               title="生成本周回顾"
               className="text-[11px] text-gray-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
             >
-              {reviewGenerating ? '回顾中…' : '📓 回顾'}
+              {reviewGenerating ? '回顾中…' : '回顾'}
             </button>
           )}
           {onOpenRecommendations && (
@@ -329,7 +331,7 @@ export default function ChatPanel({
               title="开始新对话（旧对话保留可查）"
               className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
             >
-              ↻ 新对话
+              新对话
             </button>
           )}
           {onModelChange && (
@@ -364,7 +366,7 @@ export default function ChatPanel({
               <div key={msg.id} className="flex justify-start">
                 <div className="max-w-[95%] w-full bg-gradient-to-br from-indigo-950/60 to-gray-900 border border-indigo-800/40 rounded-2xl px-3 py-3 text-sm leading-relaxed">
                   <div className="text-[10px] text-indigo-400 uppercase tracking-wider mb-1.5">
-                    📓 本周回顾
+                    本周回顾
                   </div>
                   <MessageContent
                     content={msg.content}
@@ -400,6 +402,15 @@ export default function ChatPanel({
                     {msg.model_used === 'deepseek-v4-pro' ? '深度 V4-pro' : '快速 V4-flash'}
                   </div>
                 )}
+                {msg.isError && onRetry && (
+                  <button
+                    onClick={() => onRetry(treeData)}
+                    disabled={isLoading}
+                    className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 border border-amber-700/50 hover:border-amber-600/50 rounded px-2 py-0.5 transition-colors disabled:opacity-50"
+                  >
+                    重试
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -408,7 +419,12 @@ export default function ChatPanel({
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-gray-800 text-gray-400 px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
-              <span className="animate-pulse">···</span>
+              <span className="animate-pulse">...</span>
+              {pendingCount > 0 && (
+                <span className="ml-2 text-amber-400 text-[11px]">
+                  还有 {pendingCount} 条消息等待处理
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -421,20 +437,39 @@ export default function ChatPanel({
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onInput={(e) => {
+              setInput(e.target.value)
+              const el = e.target
+              el.style.height = 'auto'
+              el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+            }}
             onKeyDown={handleKeyDown}
             placeholder="说点什么…（试试 /目标 设置当前阶段目标）"
-            rows={1}
-            className="flex-1 bg-gray-800 text-gray-200 placeholder-gray-500 text-sm px-3 py-2 rounded-xl resize-none outline-none focus:ring-1 focus:ring-blue-500"
-            style={{ maxHeight: 96 }}
+            rows={2}
+            className="flex-1 bg-gray-800 text-gray-200 placeholder-gray-500 text-sm px-3 py-2 rounded-xl resize-vertical outline-none focus:ring-1 focus:ring-blue-500"
+            style={{ maxHeight: 200, minHeight: 44 }}
           />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-2 rounded-xl transition-colors"
-          >
-            发送
-          </button>
+          {isLoading ? (
+            <button
+              onClick={() => onCancel?.()}
+              className="flex-shrink-0 bg-red-600 hover:bg-red-500 text-white text-sm px-3 py-2 rounded-xl transition-colors relative"
+            >
+              停止
+              {pendingCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-2 rounded-xl transition-colors"
+            >
+              发送
+            </button>
+          )}
         </div>
       </div>
     </div>

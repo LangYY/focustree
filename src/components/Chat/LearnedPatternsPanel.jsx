@@ -25,7 +25,7 @@ export default function LearnedPatternsPanel({ patterns, onRemove, onClose }) {
               这些是 AI 从对话中沉淀的事实。错的可以删掉。共 {sorted.length} 条
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">关闭 ✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">关闭 [x]</button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
