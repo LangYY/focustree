@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
-import { getNodeRadius, getNodeColor, getLinkStrokeWidth } from '../../lib/treeUtils'
+import { getNodeRadius, getNodeColor, getLinkStrokeWidth, findNodeById } from '../../lib/treeUtils'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
 
@@ -15,6 +15,14 @@ const NODE_HIT_PADDING = 6
 function dragPreviewPath(startX, startY, endX, endY) {
   const midX = startX + (endX - startX) * 0.5
   return `M${startX},${startY} C${midX},${startY} ${midX},${endY} ${endX},${endY}`
+}
+
+/** 算节点下面有多少子孙（不含自己） */
+function countDescendants(node) {
+  if (!node?.children?.length) return 0
+  let n = 0
+  for (const c of node.children) n += 1 + countDescendants(c)
+  return n
 }
 
 export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
@@ -130,6 +138,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('width', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING + DROP_LABEL_WIDTH)
       .attr('height', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING * 2)
       .attr('fill', 'transparent')
+      // 让 task 这种小节点也能被拖动：hit area 整个都是 drag handle
+      .style('cursor', 'grab')
 
     // 圆圈
     node.filter(d => d.data.type !== 'root')
@@ -356,6 +366,9 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
         document.body.style.webkitUserSelect = dragRef.current.previousBodyWebkitUserSelect
       }
       dragRef.current.previewLine?.remove()
+      dragRef.current.previewBadge?.remove()
+      dragRef.current.hoverEl && d3.select(dragRef.current.hoverEl).select('.node-main-circle')
+        .attr('stroke', '#1f2937').attr('stroke-width', 1.5)
     }
 
     const disableAddDuringDrag = () => {
@@ -379,7 +392,10 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       if (dragRef.current.node) return
       if ('button' in event && event.button !== 0) return
 
-      const handleEl = event.target.closest?.('.node-main-circle')
+      // 拖拽可以从「圆点」或「整个 hit area」起手——后者对 task 这种小节点关键
+      const handleEl =
+        event.target.closest?.('.node-main-circle') ||
+        event.target.closest?.('.node-hit-area')
       if (!handleEl) return
 
       // 找到最近的 .node 容器
@@ -411,6 +427,26 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
         .attr('opacity', 0.95)
         .attr('pointer-events', 'none')
 
+      // 统计这个分支带几个子孙——计数用 treeData（含折叠的），不是 D3 hierarchy（不含折叠）
+      const fullNode = findNodeById(treeData, nodeId)
+      const descendantCount = countDescendants(fullNode)
+      const previewBadge = d3.select(gRef.current)
+        .append('g')
+        .attr('class', 'drag-preview-badge')
+        .attr('pointer-events', 'none')
+        .style('opacity', 0)
+      previewBadge.append('rect')
+        .attr('rx', 4).attr('ry', 4)
+        .attr('fill', 'rgba(15, 17, 23, 0.92)')
+        .attr('stroke', '#60a5fa')
+        .attr('stroke-width', 1)
+      previewBadge.append('text')
+        .attr('class', 'drag-preview-badge-text')
+        .attr('fill', '#e5e7eb')
+        .attr('font-size', 11)
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+
       dragRef.current = {
         node: hNode,
         startX: event.clientX,
@@ -422,6 +458,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
         dragging: false,
         sourceEl: nodeEl,
         handleEl,
+        descendantCount,
+        previewBadge,
         previewLine,
         pointerId: options.pointerId,
         previousBodyUserSelect: document.body.style.userSelect,
@@ -479,6 +517,38 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
           dragRef.current.dragging = true
           disableAddDuringDrag()
           d3.select(dragRef.current.sourceEl).attr('opacity', 0.65)
+        }
+
+        // 更新预览徽章：跟着鼠标走，显示「正在移动 N+M」
+        if (dragRef.current.dragging && dragRef.current.previewBadge) {
+          const count = dragRef.current.descendantCount || 0
+          const label = count > 0 ? `移动 1 + ${count} 子` : '移动 1'
+          const badge = dragRef.current.previewBadge
+          const text = badge.select('.drag-preview-badge-text').text(label)
+          const padX = 8, padY = 4
+          // 估算文本宽度（d3 text 没有同步 getBBox，所以用粗算：字符数 * 7px）
+          const w = Math.max(60, label.length * 7 + padX * 2)
+          const h = 20
+          badge.select('rect')
+            .attr('x', -w / 2).attr('y', -h / 2)
+            .attr('width', w).attr('height', h)
+          text.attr('x', 0).attr('y', 0)
+          badge.attr('transform', `translate(${lineEndX + 28},${lineEndY - 12})`)
+            .style('opacity', 1)
+        }
+
+        // 实时高亮当前 hover 的潜在 drop target
+        const drop = findBranchDropTarget(e.clientX, e.clientY, dragRef.current.node.data.id, dragRef.current.sourceEl)
+        if (drop?.el !== dragRef.current.hoverEl) {
+          if (dragRef.current.hoverEl) {
+            d3.select(dragRef.current.hoverEl).select('.node-main-circle')
+              .attr('stroke', '#1f2937').attr('stroke-width', 1.5)
+          }
+          if (drop?.el) {
+            d3.select(drop.el).select('.node-main-circle')
+              .attr('stroke', '#34d399').attr('stroke-width', 3)
+          }
+          dragRef.current.hoverEl = drop?.el || null
         }
       }
 

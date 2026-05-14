@@ -76,11 +76,41 @@ export function useTree(user) {
     await loadNodes()
   }, [history, loadNodes])
 
-  // ── 本地展开/折叠（不写库，不记录历史）────────────────
+  // ── 展开/折叠：内存先变，DB 异步 fire-and-forget ─────
+  // 关键：必须持久化，否则任何后续 loadNodes()（CRUD 后都会触发）会重置回 DB 状态
 
-  const toggleNode  = useCallback((id) => setTreeData(prev => prev ? toggleExpanded(prev, id) : prev), [])
-  const expandAll   = useCallback(() => setTreeData(prev => prev ? setAllExpanded(prev, true)  : prev), [])
-  const collapseAll = useCallback(() => setTreeData(prev => prev ? setAllExpanded(prev, false) : prev), [])
+  const toggleNode = useCallback((id) => {
+    let nextExpanded = null
+    setTreeData(prev => {
+      if (!prev) return prev
+      const node = findNodeById(prev, id)
+      if (node) nextExpanded = !node.expanded
+      return toggleExpanded(prev, id)
+    })
+    if (user && id && id !== 'root' && nextExpanded !== null) {
+      supabase.from('nodes').update({ expanded: nextExpanded })
+        .eq('id', id).eq('user_id', user.id)
+        .then(({ error }) => { if (error) console.warn('[toggleNode] persist:', error.message) })
+    }
+  }, [user])
+
+  const expandAll = useCallback(() => {
+    setTreeData(prev => prev ? setAllExpanded(prev, true) : prev)
+    if (user) {
+      supabase.from('nodes').update({ expanded: true })
+        .eq('user_id', user.id)
+        .then(({ error }) => { if (error) console.warn('[expandAll]:', error.message) })
+    }
+  }, [user])
+
+  const collapseAll = useCallback(() => {
+    setTreeData(prev => prev ? setAllExpanded(prev, false) : prev)
+    if (user) {
+      supabase.from('nodes').update({ expanded: false })
+        .eq('user_id', user.id)
+        .then(({ error }) => { if (error) console.warn('[collapseAll]:', error.message) })
+    }
+  }, [user])
 
   // ── 状态变更（mark_done / mark_active / mark_dormant）──
 

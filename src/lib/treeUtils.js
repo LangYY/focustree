@@ -8,17 +8,28 @@ export function flatToTree(nodes) {
   nodes.forEach(n => { map[n.id] = { ...n, children: [] } })
 
   const roots = []
+  const orphans = []
   nodes.forEach(n => {
-    if (n.parent_id && map[n.parent_id]) {
-      map[n.parent_id].children.push(map[n.id])
-    } else if (!n.parent_id) {
+    if (!n.parent_id) {
       roots.push(map[n.id])
+    } else if (map[n.parent_id]) {
+      map[n.parent_id].children.push(map[n.id])
+    } else {
+      // ⚠️ parent_id 指向不存在的节点（理论上 FK 约束应该禁止，但兜底防御）
+      // 把孤儿挂到 root 而不是静默丢弃——以前的 bug：丢弃会让用户感觉节点消失
+      orphans.push(map[n.id])
     }
   })
 
+  if (orphans.length) {
+    console.warn(`[flatToTree] 发现 ${orphans.length} 个孤儿节点，已挂到根级显示：`,
+      orphans.map(o => `${o.name}(${o.id}) → parent_id=${o.parent_id}`))
+    roots.push(...orphans)
+  }
+
   // 按 position 排序
   function sortChildren(node) {
-    node.children.sort((a, b) => a.position - b.position)
+    node.children.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
     node.children.forEach(sortChildren)
     return node
   }
