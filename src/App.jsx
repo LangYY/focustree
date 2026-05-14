@@ -38,24 +38,34 @@ export default function App() {
 
   // ── Auth ────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let isMounted = true
+
+    const syncSession = (session, { markReady = false } = {}) => {
+      if (!isMounted) return
       const nextUser = session?.user ?? null
       const nextId = nextUser?.id ?? null
-      if (lastUserIdRef.current === nextId) return
-      lastUserIdRef.current = nextId
-      setUser(nextUser)
-      setAuthLoading(false)
+      if (lastUserIdRef.current !== nextId) {
+        lastUserIdRef.current = nextId
+        setUser(nextUser)
+      }
+      if (markReady) setAuthLoading(false)
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      syncSession(session, { markReady: true })
+    }).catch((error) => {
+      console.error('[auth] getSession failed:', error)
+      if (isMounted) setAuthLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // TOKEN_REFRESHED / INITIAL_SESSION 不改变用户身份，跳过
-      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return
-      const nextUser = session?.user ?? null
-      const nextId = nextUser?.id ?? null
-      if (lastUserIdRef.current === nextId) return
-      lastUserIdRef.current = nextId
-      setUser(nextUser)
+      // TOKEN_REFRESHED 不改变用户身份，跳过即可；INITIAL_SESSION 可作为首次就绪信号。
+      if (event === 'TOKEN_REFRESHED') return
+      syncSession(session, { markReady: event === 'INITIAL_SESSION' })
     })
-    return () => subscription.unsubscribe()
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const {
