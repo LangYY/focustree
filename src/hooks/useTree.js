@@ -286,6 +286,11 @@ export function useTree(user) {
     const prevParentId = node.parent_id || null
     if (prevParentId === targetParentId) return
 
+    // 1. 乐观更新本地树：先把这一支从旧位置剪下来，再挂到新父下
+    //    这样 UI 立刻反映新结构，不会闪烁、不会丢 expand 状态
+    setTreeData(prev => prev ? moveSubtreeInTree(prev, nodeId, targetParentId) : prev)
+
+    // 2. 后台异步写库；失败再回滚 UI
     const { error } = await supabase
       .from('nodes')
       .update({ parent_id: targetParentId })
@@ -295,15 +300,16 @@ export function useTree(user) {
     if (error) {
       console.error('[moveNode]', error.message)
       alert(`移动失败：${error.message}`)
+      // 回滚
+      setTreeData(prev => prev ? moveSubtreeInTree(prev, nodeId, prevParentId) : prev)
       return
     }
 
     pushHistory(`移动「${node.name}」`, async () => {
       await supabase.from('nodes').update({ parent_id: prevParentId }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? moveSubtreeInTree(prev, nodeId, prevParentId) : prev)
     })
-
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+  }, [user, treeData, pushHistory])
 
   // ── 清空所有（clear_all）─────────────────────────────
 
@@ -370,6 +376,46 @@ function setAllExpanded(node, value) {
 function toggleExpanded(node, id) {
   if (node.id === id) return { ...node, expanded: !node.expanded }
   return { ...node, children: node.children?.map(c => toggleExpanded(c, id)) }
+}
+
+/**
+ * 把整个 subtree 从原父下剪掉，挂到新父下（targetParentId）。
+ * 不修改子树本身的结构、不重置 expand 状态。targetParentId 为 null 时挂到根。
+ * 返回新的 tree（不可变）。
+ */
+function moveSubtreeInTree(tree, nodeId, targetParentId) {
+  let extracted = null
+
+  function cut(node) {
+    if (!node.children?.length) return node
+    const nextChildren = []
+    for (const c of node.children) {
+      if (c.id === nodeId) {
+        extracted = c
+        continue
+      }
+      nextChildren.push(cut(c))
+    }
+    return { ...node, children: nextChildren }
+  }
+
+  function paste(node) {
+    if (!extracted) return node
+    const newParentId = targetParentId ?? 'root'
+    const isTarget = (targetParentId == null && node.id === 'root') || node.id === targetParentId
+    if (isTarget) {
+      const updatedChild = { ...extracted, parent_id: targetParentId ?? null }
+      const newChildren = [...(node.children || []), updatedChild]
+      return { ...node, children: newChildren, expanded: true }
+    }
+    if (!node.children?.length) return node
+    return { ...node, children: node.children.map(paste) }
+  }
+
+  if (!tree) return tree
+  const cutTree = cut(tree)
+  if (!extracted) return tree
+  return paste(cutTree)
 }
 
 // ── 新用户示例数据 ────────────────────────────────────

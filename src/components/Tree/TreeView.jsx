@@ -273,15 +273,16 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     const zoom = d3.zoom()
       .scaleExtent([0.15, 3])
       .filter((event) => {
-        // 仅 pinch 缩放：ctrlKey + wheel（触控板两指捏合 → 浏览器自动加 ctrlKey）
+        // ✅ 仅允许：pinch 缩放（ctrlKey + wheel）+ 触摸屏 pinch
+        // ❌ 禁止：mousedown / pointerdown 触发的拖拽平移
+        //         因为 macOS 三指拖拽会变成 mousedown，会被误解为「拖动画布」
+        //         平移完全交给 wheel.pan（二指滑动）处理
         if (event.type === 'wheel' && event.ctrlKey) return true
-        // 触摸屏手势
-        if (event.type.startsWith('touch')) return true
-        // 鼠标拖拽背景 → 平移（节点上的 mousedown/pointerdown 不激活 zoom）
-        if (event.type === 'mousedown' || event.type === 'pointerdown') {
-          return event.target === svgRef.current || event.target.tagName === 'svg'
+        if (event.type === 'touchstart' || event.type === 'touchmove') {
+          // 仅多指触摸（pinch）才允许 zoom；单指 touch 留给节点拖拽
+          return event.touches && event.touches.length >= 2
         }
-        return !!event.sourceEvent
+        return false
       })
       .on('zoom', (event) => {
         d3.select(gRef.current).attr('transform', event.transform)
@@ -290,7 +291,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     zoomRef.current = zoom
     svg.call(zoom)
 
-    // 双指滑动 / 鼠标滚轮（无 ctrlKey）→ 平移画布
+    // 二指滑动 / 鼠标滚轮（无 ctrlKey）→ 平移画布。这是唯一的平移途径。
     svg.on('wheel.pan', (event) => {
       if (event.ctrlKey) return  // pinch 由 d3.zoom 处理
       event.preventDefault()
