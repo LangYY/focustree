@@ -80,8 +80,8 @@ export default function App() {
   // 用户画像（当前阶段目标等）
   const { goal, goalText, goalExpired, setGoal, clearGoal } = useUserProfile(user)
 
-  // 把树操作打包传给 useChat，AI 可以直接调用
-  const treeActions = { addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode }
+  // 把树操作打包传给 useChat，AI / 算法层都能直接调用
+  const treeActions = { addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, expandAll, collapseAll }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
     retryLastMessage, cancelRequest, pendingQueue,

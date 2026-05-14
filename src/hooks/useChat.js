@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { treeToPromptText, flattenTree } from '../lib/treeUtils'
 import { getClientTime } from '../lib/clientTime'
+import { classifyIntent } from '../lib/intentClassifier'
 
 const WELCOME = {
   id: 'welcome',
@@ -265,6 +266,77 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         user_id: user.id, role: 'user', content,
         session_id: activeSession,
       })
+    }
+
+    // ⚡ 算法层短路：明确指令（加/删/改/标记 等）直接本地执行，不打 LLM
+    //   节省 token、消除模型差异、零延迟。只有推理类问题才下沉到 LLM。
+    const intent = classifyIntent(content, treeData)
+    if (intent.matched) {
+      try {
+        // 特殊操作（展开/折叠所有）
+        if (intent.special === 'expandAll'   && treeActions?.expandAll)   { treeActions.expandAll();   }
+        if (intent.special === 'collapseAll' && treeActions?.collapseAll) { treeActions.collapseAll(); }
+
+        // 算法解析出 reply（比如歧义提示），直接显示
+        if (intent.reply) {
+          const assistantMsg = {
+            id: uuid(), role: 'assistant', content: intent.reply,
+            kind: 'local',
+          }
+          setMessages(prev => [...prev, assistantMsg])
+          if (user) {
+            supabase.from('conversations').insert({
+              user_id: user.id, role: 'assistant', content: intent.reply,
+              session_id: activeSession,
+            })
+          }
+          setIsLoading(false)
+          return
+        }
+
+        // 执行 actions
+        const actionLogs = []
+        const newIdByName = {}
+        if (intent.actions?.length && treeActions) {
+          for (const action of intent.actions) {
+            if (action.parent && newIdByName[action.parent]) {
+              action.parent = newIdByName[action.parent]
+            }
+            const r = await executeAction(action, treeActions)
+            if (r?.log) actionLogs.push(r.log)
+            if (r?.newId && action.name) newIdByName[action.name] = r.newId
+          }
+        }
+
+        // 用一条极简的本地 reply 替代 LLM 的回复
+        const replyText = intent.special
+          ? '✓ 已操作'
+          : (actionLogs.length
+              ? actionLogs.map(l => `✅ ${l}`).join('\n')
+              : '✓ 已处理')
+
+        const assistantMsg = {
+          id: uuid(), role: 'assistant', content: replyText,
+          kind: 'local',
+        }
+        setMessages(prev => [...prev, assistantMsg])
+
+        if (user && !intent.special) {
+          supabase.from('conversations').insert({
+            user_id: user.id, role: 'assistant', content: replyText,
+            session_id: activeSession,
+          })
+        }
+      } catch (err) {
+        console.error('[useChat] local intent execution failed:', err)
+        setMessages(prev => [...prev, {
+          id: uuid(), role: 'assistant',
+          content: `操作出错：${err.message || err}`,
+        }])
+      } finally {
+        setIsLoading(false)
+      }
+      return  // 短路成功，不打 LLM
     }
 
     try {
