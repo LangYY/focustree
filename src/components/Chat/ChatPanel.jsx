@@ -402,6 +402,11 @@ export default function ChatPanel({
                     {msg.model_used === 'deepseek-v4-pro' ? '深度 V4-pro' : '快速 V4-flash'}
                   </div>
                 )}
+                {msg.role === 'assistant' && msg.kind === 'local' && (
+                  <div className="mt-1 text-[10px] text-gray-600">
+                    本地算法 · 0 token
+                  </div>
+                )}
                 {msg.isError && onRetry && (
                   <button
                     onClick={() => onRetry(treeData)}
