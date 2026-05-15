@@ -130,6 +130,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       })
       .on('mouseout', () => setTooltip(null))
 
+    // 大 hit area：用于 drop 命中（向右延伸 DROP_LABEL_WIDTH 让 label 区也算）
+    // 注意：不参与 drag start，否则会"误抓父节点向右延伸的 label 区"
     node.filter(d => d.data.type !== 'root')
       .append('rect')
       .attr('class', 'node-hit-area')
@@ -138,7 +140,18 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('width', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING + DROP_LABEL_WIDTH)
       .attr('height', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING * 2)
       .attr('fill', 'transparent')
-      // 让 task 这种小节点也能被拖动：hit area 整个都是 drag handle
+
+    // 小 drag handle：紧贴圆点一圈，仅这里能起手拖拽
+    // 即使是 task 节点（radius=6），handle 也比纯圆点大一圈，方便抓取
+    const DRAG_HANDLE_PADDING = 8
+    node.filter(d => d.data.type !== 'root')
+      .append('rect')
+      .attr('class', 'node-drag-handle')
+      .attr('x', d => -getNodeRadius(d.data.type) - DRAG_HANDLE_PADDING)
+      .attr('y', d => -getNodeRadius(d.data.type) - DRAG_HANDLE_PADDING)
+      .attr('width', d => (getNodeRadius(d.data.type) + DRAG_HANDLE_PADDING) * 2)
+      .attr('height', d => (getNodeRadius(d.data.type) + DRAG_HANDLE_PADDING) * 2)
+      .attr('fill', 'transparent')
       .style('cursor', 'grab')
 
     // 圆圈
@@ -393,10 +406,12 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       if (dragRef.current.node) return
       if ('button' in event && event.button !== 0) return
 
-      // 拖拽可以从「圆点」或「整个 hit area」起手——后者对 task 这种小节点关键
+      // 拖拽起手：圆点 或 紧贴圆点的小 drag-handle（task 这种小节点用）
+      // 注意：不用 .node-hit-area —— 那个向右延伸到 label 区，
+      //       会让"父节点 label 末尾"被误判成抓父节点
       const handleEl =
         event.target.closest?.('.node-main-circle') ||
-        event.target.closest?.('.node-hit-area')
+        event.target.closest?.('.node-drag-handle')
       if (!handleEl) return
 
       // 找到最近的 .node 容器
@@ -520,15 +535,17 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
           d3.select(dragRef.current.sourceEl).attr('opacity', 0.65)
         }
 
-        // 更新预览徽章：跟着鼠标走，显示「正在移动 N+M」
+        // 更新预览徽章：跟着鼠标走，显示「正在拖动 <节点名>（+N 子）」
         if (dragRef.current.dragging && dragRef.current.previewBadge) {
           const count = dragRef.current.descendantCount || 0
-          const label = count > 0 ? `移动 1 + ${count} 子` : '移动 1'
+          const sourceName = dragRef.current.node?.data?.name || '节点'
+          const truncated = sourceName.length > 12 ? sourceName.slice(0, 12) + '…' : sourceName
+          const label = count > 0 ? `${truncated} +${count}子` : truncated
           const badge = dragRef.current.previewBadge
           const text = badge.select('.drag-preview-badge-text').text(label)
           const padX = 8, padY = 4
-          // 估算文本宽度（d3 text 没有同步 getBBox，所以用粗算：字符数 * 7px）
-          const w = Math.max(60, label.length * 7 + padX * 2)
+          // 中文宽度大概 14px，英文 7px，简单粗估
+          const w = Math.max(70, label.length * 12 + padX * 2)
           const h = 20
           badge.select('rect')
             .attr('x', -w / 2).attr('y', -h / 2)
