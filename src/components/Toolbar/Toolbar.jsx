@@ -9,6 +9,7 @@ export default function Toolbar({
   user, onSignOut,
   canUndo, lastAction, onUndo,
   history,
+  onOpenBackup, backupWarning,
 }) {
   const [showHistory, setShowHistory] = useState(false)
 
@@ -86,6 +87,24 @@ export default function Toolbar({
         </div>
 
         <div className="w-px h-4 bg-gray-700" />
+
+        {/* 数据备份/恢复 */}
+        {onOpenBackup && (
+          <button
+            onClick={onOpenBackup}
+            title={backupWarning ? '⚠️ 建议尽快导出一份数据到文件' : '数据备份与恢复'}
+            className={`text-xs px-2 py-1 rounded-lg border transition-colors relative ${
+              backupWarning
+                ? 'border-amber-700/60 text-amber-300 hover:bg-amber-900/30'
+                : 'border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500'
+            }`}
+          >
+            数据
+            {backupWarning && (
+              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />
+            )}
+          </button>
+        )}
 
         <button
           onClick={onToggleChat}

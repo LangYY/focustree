@@ -10,11 +10,13 @@ import ChatHistoryPanel from './components/Chat/ChatHistoryPanel'
 import LearnedPatternsPanel from './components/Chat/LearnedPatternsPanel'
 import RecommendationLogPanel from './components/Chat/RecommendationLogPanel'
 import TodayCard from './components/Tree/TodayCard'
+import BackupPanel from './components/Modals/BackupPanel'
 import { useTree } from './hooks/useTree'
 import { useChat } from './hooks/useChat'
 import { useUserProfile } from './hooks/useUserProfile'
 import { useDailyFocus } from './hooks/useDailyFocus'
 import { useWeeklyReview } from './hooks/useWeeklyReview'
+import { useBackup } from './hooks/useBackup'
 
 export default function App() {
   const [user, setUser]           = useState(null)
@@ -25,6 +27,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [learnedOpen, setLearnedOpen] = useState(false)
   const [recsOpen,    setRecsOpen]    = useState(false)
+  const [backupOpen,  setBackupOpen]  = useState(false)
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
   const resetZoomRef              = useRef(null)
 
@@ -81,7 +84,42 @@ export default function App() {
   const { goal, goalText, goalExpired, setGoal, clearGoal } = useUserProfile(user)
 
   // 把树操作打包传给 useChat，AI / 算法层都能直接调用
-  const treeActions = { addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, expandAll, collapseAll }
+  // clearAll 用 ref 包裹，下面在 useBackup 就绪后插入 pre-destructive 备份
+  const backupRef = useRef(null)
+  const guardedClearAll = useCallback(async () => {
+    try {
+      await backupRef.current?.preDestructiveBackup?.('清空全部前')
+    } catch (e) { console.warn('[guardedClearAll] backup failed:', e) }
+    return clearAll()
+  }, [clearAll])
+  const guardedDeleteNode = useCallback(async (nodeId) => {
+    // 删大子树前自动备份（≥ 3 个子节点视为"大"）
+    let isLarge = false
+    try {
+      // 简单判断：找到节点并看有没有 children 数组
+      const queue = treeData ? [treeData] : []
+      while (queue.length) {
+        const n = queue.shift()
+        if (n.id === nodeId) {
+          isLarge = (n.children?.length || 0) >= 3
+          break
+        }
+        if (n.children) queue.push(...n.children)
+      }
+    } catch (e) { /* ignore */ }
+    if (isLarge) {
+      try {
+        await backupRef.current?.preDestructiveBackup?.('删除子树前')
+      } catch (e) { console.warn('[guardedDeleteNode] backup failed:', e) }
+    }
+    return deleteNode(nodeId)
+  }, [deleteNode, treeData])
+  const treeActions = {
+    addNode, renameNode, updateStatus,
+    deleteNode: guardedDeleteNode,
+    clearAll: guardedClearAll,
+    annotateNode, expandAll, collapseAll,
+  }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
     retryLastMessage, cancelRequest, pendingQueue,
@@ -97,6 +135,14 @@ export default function App() {
 
   // 周末回顾
   const weeklyReview = useWeeklyReview(user, goal, injectReviewMessage)
+
+  // 备份系统
+  const backup = useBackup(user, /* onAfterRestore */ () => {
+    // 恢复完成后强制刷新整棵树
+    window.location.reload()
+  })
+  // 把 backup 暴露给上面 guardedClearAll/guardedDeleteNode 用的 ref
+  useEffect(() => { backupRef.current = backup }, [backup])
 
   // ── 右键菜单动作处理 ────────────────────────────────
   const handleContextAction = useCallback(async (action, payload) => {
@@ -128,7 +174,8 @@ export default function App() {
         ? `删除「${node.name}」及其所有子节点？此操作不可撤销。`
         : `删除「${node.name}」？此操作不可撤销。`
       if (window.confirm(msg)) {
-        await deleteNode(node.id)
+        // guardedDeleteNode 已自动处理 pre-destructive 备份（≥3 子节点时）
+        await guardedDeleteNode(node.id)
       }
     }
   }, [renameNode, updateStatus, deleteNode, updateWeight])
@@ -177,6 +224,8 @@ export default function App() {
         lastAction={lastAction}
         onUndo={undo}
         history={history}
+        onOpenBackup={() => setBackupOpen(true)}
+        backupWarning={!backup.lastManual || (Date.now() - backup.lastManual) > 7 * 24 * 3600 * 1000}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -294,6 +343,21 @@ export default function App() {
           hitRate={hitRate}
           treeData={treeData}
           onClose={() => setRecsOpen(false)}
+        />
+      )}
+
+      {/* 数据备份面板 */}
+      {backupOpen && (
+        <BackupPanel
+          list={backup.list}
+          lastAuto={backup.lastAuto}
+          lastManual={backup.lastManual}
+          working={backup.working}
+          progress={backup.progress}
+          onExport={backup.exportToFile}
+          onRestoreFile={backup.restoreFromFile}
+          onRestoreLocal={backup.restoreFromLocal}
+          onClose={() => setBackupOpen(false)}
         />
       )}
     </div>
