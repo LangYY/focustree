@@ -5,6 +5,8 @@
  * 输出严格 JSON schema：{ summary, key_decisions: [], topics: [] }
  */
 
+import { postChatCompletion } from './llmClient.js'
+
 const SUMMARY_SYSTEM_PROMPT = `你是「专注树」会话摘要器。任务：把用户和 AI 的一段对话压缩成结构化记忆。
 你的输出必须是合法 JSON，不得包含任何额外文字或 markdown。
 
@@ -31,7 +33,7 @@ assistant: 收到
 输出：
 {"summary":"用户决定优先推进 B 站脚本，暂时搁置求职项目","key_decisions":["优先 B 站脚本","暂停求职"],"topics":["B 站频道","项目优先级"]}`
 
-export async function summarizeSession({ messages, apiKey }) {
+export async function summarizeSession({ messages, apiKey, provider = 'deepseek' }) {
   if (!messages?.length) return null
   // 把对话拼成纯文本
   const text = messages
@@ -39,29 +41,18 @@ export async function summarizeSession({ messages, apiKey }) {
     .join('\n')
     .slice(0, 4000)   // 安全截断
 
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-v4-flash',          // 摘要用便宜模型
-      temperature: 0.3,
-      max_tokens: 400,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
-        { role: 'user',   content: `请总结以下对话：\n\n${text}` },
-      ],
-    }),
-  })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Summary LLM error ${res.status}: ${err}`)
-  }
-  const data = await res.json()
+  const data = await postChatCompletion(provider, {
+    model: provider === 'openai'
+      ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
+      : 'deepseek-v4-flash',          // 摘要用便宜模型
+    temperature: 0.3,
+    max_tokens: 400,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+      { role: 'user',   content: `请总结以下对话：\n\n${text}` },
+    ],
+  }, { apiKey })
   const raw = data.choices?.[0]?.message?.content || ''
   try {
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()

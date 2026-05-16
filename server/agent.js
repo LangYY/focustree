@@ -9,6 +9,8 @@
  * 5. 全部失败时返回安全降级结果
  */
 
+import { postChatCompletion } from './llmClient.js'
+
 const MAX_RETRIES = 3
 const VALID_TYPES = [
   'mark_done', 'mark_active', 'mark_dormant',
@@ -32,6 +34,7 @@ const VALID_STRATEGIC_TAG = ['现金流', '资产积累', '信号建立', '维�
  * @param {Array} history          对话历史 [{role, content}]
  * @param {object} userGoal        { text, set_at, expires_at, constraints, exclude } | null
  * @param {string} model           'auto' | 'chat' | 'reasoner'，默认 'auto'
+ * @param {string} provider        'deepseek' | 'openai'，默认 'deepseek'
  * @param {string} apiKey          LLM API key
  * @returns {{ intent, reply, actions, thinking?, model_used? }}
  */
@@ -39,11 +42,11 @@ export async function runAgent({
   message, treeText, nodeIdSet, history, userGoal,
   recentSummaries = [], learnedPatterns = [], hitRate = null,
   clientTime = null,
-  model = 'auto', apiKey,
+  model = 'auto', provider = 'deepseek', apiKey,
   signal = null,
 }) {
   const systemPrompt = buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime)
-  const modelName = resolveModel(model, message)
+  const modelName = resolveModel(model, message, provider)
   let lastError = null
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -61,7 +64,7 @@ export async function runAgent({
 
     let raw
     try {
-      raw = await callLLM(effectivePrompt, messages, apiKey, modelName, signal)
+      raw = await callLLM(effectivePrompt, messages, apiKey, modelName, provider, signal)
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
@@ -106,19 +109,27 @@ export async function runAgent({
 }
 
 /**
- * 'auto' / 'chat' / 'reasoner' → 实际 deepseek 模型名
+ * 'auto' / 'chat' / 'reasoner' → 实际模型名
  * auto 模式启发式：如果消息像推荐/优先级/建议类问题，用 reasoner；否则 chat
  */
-function resolveModel(mode, message) {
-  if (mode === 'chat')     return 'deepseek-v4-flash'   // 快速：V4 小模型
-  if (mode === 'reasoner') return 'deepseek-v4-pro'     // 深度：V4 大模型（真正的推理）
+function resolveModel(mode, message, provider = 'deepseek') {
+  const isOpenAI = provider === 'openai'
+  const chatModel = isOpenAI
+    ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
+    : 'deepseek-v4-flash'
+  const reasonerModel = isOpenAI
+    ? (process.env.OPENAI_MODEL_REASONER || process.env.OPENAI_MODEL || 'gpt-4o')
+    : 'deepseek-v4-pro'
+
+  if (mode === 'chat')     return chatModel
+  if (mode === 'reasoner') return reasonerModel
 
   // auto 模式：除了简单"操作"型指令（添加/标完成/重命名/删除），其它一律走 V4-pro
   // 反向白名单更稳：明确判定为"纯操作"才用 flash，模糊就用 pro
   const msg = message.trim()
 
   // 1. 极短 + 非问句 → 可能是测试或填充 → flash
-  if (msg.length < 4 && !/[?？]/.test(msg)) return 'deepseek-v4-flash'
+  if (msg.length < 4 && !/[?？]/.test(msg)) return chatModel
 
   // 2. 纯命令式（含明确操作动词 + 不带反思/推理词 + 不是问句）
   //    用"含有"而非"开头"，覆盖"在 X 下添加 Y"这种位置在中间的指令
@@ -126,11 +137,11 @@ function resolveModel(mode, message) {
   const reasoningWords = /(建议|推荐|该|应该|为什么|怎么|哪个|哪些|分析|思考|规划|策略|优先|值得|要不要|该不该|做什么|做啥|做设么|做点啥|想做)/
   const isQuestion     = /[?？]/.test(msg)
   if (actionVerbs.test(msg) && !reasoningWords.test(msg) && !isQuestion) {
-    return 'deepseek-v4-flash'
+    return chatModel
   }
 
   // 3. 其他一切（问句 / 推理词 / 较长输入 / 不确定）→ V4-pro
-  return 'deepseek-v4-pro'
+  return reasonerModel
 }
 
 // ── Prompt 构建 ───────────────────────────────────────
@@ -563,7 +574,8 @@ function buildMessages(history, message) {
 
 // ── LLM 调用 ─────────────────────────────────────────
 
-async function callLLM(systemPrompt, messages, apiKey, modelName, signal) {
+async function callLLM(systemPrompt, messages, apiKey, modelName, provider, signal) {
+  const isDeepSeek = provider !== 'openai'
   const isPro = modelName === 'deepseek-v4-pro'
   const body = {
     model: modelName,
@@ -574,27 +586,12 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, signal) {
     max_tokens: isPro ? 16000 : 4000,
   }
   // pro 模型内置推理，不需要 temperature 也不接受 response_format；flash 用低温 + json_object 确保格式
-  if (!isPro) {
+  if (!isDeepSeek || !isPro) {
     body.temperature = 0.3
     body.response_format = { type: 'json_object' }
   }
 
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`LLM API error ${res.status}: ${err}`)
-  }
-
-  const data = await res.json()
+  const data = await postChatCompletion(provider, body, { apiKey, signal })
   return data.choices?.[0]?.message?.content || ''
 }
 

@@ -18,7 +18,8 @@
     "d3": "^7.9.0",
     "express": "^5.2.1",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "undici": "^8.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

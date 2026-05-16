@@ -23,6 +23,14 @@ function parseTaskRefs(line, nameToId) {
   return out
 }
 
+function formatModelLabel(modelUsed) {
+  if (!modelUsed) return ''
+  if (modelUsed === 'deepseek-v4-pro') return 'DeepSeek V4-pro'
+  if (modelUsed === 'deepseek-v4-flash' || modelUsed === 'deepseek-chat') return 'DeepSeek V4-flash'
+  if (modelUsed.startsWith('gpt-')) return `OpenAI ${modelUsed}`
+  return modelUsed
+}
+
 /**
  * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
@@ -399,7 +407,7 @@ export default function ChatPanel({
                 )}
                 {msg.role === 'assistant' && msg.model_used && (
                   <div className="mt-1 text-[10px] text-gray-500">
-                    {msg.model_used === 'deepseek-v4-pro' ? '深度 V4-pro' : '快速 V4-flash'}
+                    {formatModelLabel(msg.model_used)}
                   </div>
                 )}
                 {msg.role === 'assistant' && msg.kind === 'local' && (

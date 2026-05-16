@@ -7,6 +7,8 @@
  * 用 V4-pro 模型，确保推荐质量。
  */
 
+import { postChatCompletion } from './llmClient.js'
+
 const SYSTEM = `你是「专注树」的每日规划师。任务：根据用户当前阶段目标、项目树、最近的会话和学到的模式，给出**今天最值得做的 3 件事**。
 
 你的唯一输出必须是合法 JSON，不得包含任何额外文字或 markdown。
@@ -39,7 +41,7 @@ const SYSTEM = `你是「专注树」的每日规划师。任务：根据用户�
 - 不要套话："这件事很重要" 这种废话直接删掉`
 
 export async function generateDailyFocus({
-  treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime, apiKey,
+  treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime, apiKey, provider = 'deepseek',
 }) {
   const contextParts = []
 
@@ -67,29 +69,17 @@ export async function generateDailyFocus({
 
   const userMsg = contextParts.join('\n\n')
 
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-v4-pro',
-      max_tokens: 3500,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user',   content: userMsg },
-      ],
-    }),
-  })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`DailyFocus LLM error ${res.status}: ${err}`)
-  }
-
-  const data = await res.json()
+  const data = await postChatCompletion(provider, {
+    model: provider === 'openai'
+      ? (process.env.OPENAI_MODEL_REASONER || process.env.OPENAI_MODEL || 'gpt-4o')
+      : 'deepseek-v4-pro',
+    max_tokens: 3500,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user',   content: userMsg },
+    ],
+  }, { apiKey })
   const raw = data.choices?.[0]?.message?.content || ''
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
   try {

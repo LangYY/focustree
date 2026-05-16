@@ -8,6 +8,8 @@
  * 用 V4-pro，确保深度。
  */
 
+import { postChatCompletion } from './llmClient.js'
+
 const SYSTEM = `你是「专注树」的成长教练，每周日晚为用户做一次反思性回顾。
 
 你的唯一输出必须是合法 JSON，不得包含任何额外文字或 markdown。
@@ -44,6 +46,7 @@ export async function generateWeeklyReview({
   userGoal,
   stats,                  // { completed_tasks: [{name, completed_at, project}], dropped_recs, hit_rate, dormant_projects, new_learned_patterns, key_decisions, recent_summaries }
   apiKey,
+  provider = 'deepseek',
 }) {
   const ctx = []
   ctx.push(`## 本周时间窗\n${weekStart} → ${weekEnd}`)
@@ -89,29 +92,17 @@ export async function generateWeeklyReview({
 
   const userMsg = ctx.join('\n\n')
 
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-v4-pro',
-      max_tokens: 4000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user',   content: userMsg },
-      ],
-    }),
-  })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`WeeklyReview LLM error ${res.status}: ${err}`)
-  }
-
-  const data = await res.json()
+  const data = await postChatCompletion(provider, {
+    model: provider === 'openai'
+      ? (process.env.OPENAI_MODEL_REASONER || process.env.OPENAI_MODEL || 'gpt-4o')
+      : 'deepseek-v4-pro',
+    max_tokens: 4000,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user',   content: userMsg },
+    ],
+  }, { apiKey })
   const raw  = data.choices?.[0]?.message?.content || ''
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
   try {

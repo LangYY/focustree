@@ -5,18 +5,21 @@ import { runAgent } from './agent.js'
 import { summarizeSession } from './summarizer.js'
 import { generateDailyFocus } from './dailyFocus.js'
 import { generateWeeklyReview } from './weeklyReview.js'
+import { postChatCompletion } from './llmClient.js'
 
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 
-const API_KEY  = process.env.DEEPSEEK_API_KEY
+const LLM_PROVIDER = process.env.LLM_PROVIDER === 'openai' ? 'openai' : 'deepseek'
+const API_KEY  = LLM_PROVIDER === 'openai' ? process.env.OPENAI_API_KEY : process.env.DEEPSEEK_API_KEY
 const SUPA_URL = process.env.SUPABASE_URL
 const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-if (!API_KEY)  console.error('❌ DEEPSEEK_API_KEY not set')
+if (!API_KEY)  console.error(`❌ ${LLM_PROVIDER === 'openai' ? 'OPENAI_API_KEY' : 'DEEPSEEK_API_KEY'} not set`)
 if (!SUPA_URL) console.warn('⚠️ SUPABASE_URL not set — summarizer disabled')
 if (!SUPA_KEY) console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY not set — summarizer disabled')
+console.log(`[llm] provider=${LLM_PROVIDER}`)
 
 // 服务端 supabase client（bypass RLS，用 service role）
 const supa = (SUPA_URL && SUPA_KEY) ? createClient(SUPA_URL, SUPA_KEY) : null
@@ -39,12 +42,17 @@ app.post('/api/agent', async (req, res) => {
 
   const controller = new AbortController()
 
-  // 客户端断开连接（停止按钮/关标签页）时取消 LLM 调用
-  req.on('close', () => {
+  // 客户端真正断开连接（停止按钮/关标签页）时取消 LLM 调用。
+  // req.close 会在请求体读取完成后触发，不能拿来判断断连。
+  const abortClientRequest = () => {
     if (!res.writableEnded) {
       console.log('[/api/agent] client disconnected, aborting')
       controller.abort()
     }
+  }
+  req.on('aborted', abortClientRequest)
+  res.on('close', () => {
+    if (!res.writableEnded) abortClientRequest()
   })
 
   try {
@@ -60,6 +68,7 @@ app.post('/api/agent', async (req, res) => {
       hitRate:  hitRate || null,
       clientTime: clientTime || null,
       model:    model || 'auto',
+      provider: LLM_PROVIDER,
       apiKey:   API_KEY,
       signal:   controller.signal,
     })
@@ -115,7 +124,7 @@ app.post('/api/summarize-session', async (req, res) => {
     }
 
     console.log('[summarize] starting for session', session_id, 'with', msgs.length, 'messages')
-    const summary = await summarizeSession({ messages: msgs, apiKey: API_KEY })
+    const summary = await summarizeSession({ messages: msgs, apiKey: API_KEY, provider: LLM_PROVIDER })
     if (!summary) return res.status(500).json({ error: 'summary generation failed' })
 
     const { error: insertErr } = await supa.from('session_summaries').insert({
@@ -156,6 +165,7 @@ app.post('/api/daily-focus', async (req, res) => {
       learnedPatterns: learnedPatterns || [],
       hitRate:  hitRate || null,
       clientTime: clientTime || null,
+      provider: LLM_PROVIDER,
       apiKey:   API_KEY,
     })
     if (!result) return res.status(500).json({ error: 'generation failed' })
@@ -184,6 +194,7 @@ app.post('/api/weekly-review', async (req, res) => {
       weekStart, weekEnd,
       userGoal: userGoal || null,
       stats:    stats || {},
+      provider: LLM_PROVIDER,
       apiKey:   API_KEY,
     })
     if (!review) return res.status(500).json({ error: 'review generation failed' })
@@ -201,25 +212,17 @@ app.post('/api/chat', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ error: 'API key not configured' })
 
   try {
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [{ role: 'system', content: system }, ...messages],
-        max_tokens: 500,
-        temperature: 0.7,
-        response_format: { type: 'json_object' },
-      }),
+    const data = await postChatCompletion(LLM_PROVIDER, {
+      model: LLM_PROVIDER === 'openai'
+        ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
+        : 'deepseek-chat',
+      messages: [{ role: 'system', content: system }, ...messages],
+      max_tokens: 500,
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    }, {
+      apiKey: API_KEY,
     })
-    if (!response.ok) {
-      const err = await response.text()
-      return res.status(response.status).json({ error: err })
-    }
-    const data = await response.json()
     res.json({ content: data.choices?.[0]?.message?.content || '' })
   } catch (err) {
     res.status(500).json({ error: err.message })
