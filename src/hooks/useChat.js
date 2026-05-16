@@ -277,8 +277,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         if (intent.special === 'expandAll'   && treeActions?.expandAll)   { treeActions.expandAll();   }
         if (intent.special === 'collapseAll' && treeActions?.collapseAll) { treeActions.collapseAll(); }
 
-        // 算法解析出 reply（比如歧义提示），直接显示
-        if (intent.reply) {
+        // 算法解析出纯提示（比如歧义/找不到），直接显示；带 actions 的 reply 继续往下执行动作
+        if (intent.reply && !intent.actions?.length && !intent.special) {
           const assistantMsg = {
             id: uuid(), role: 'assistant', content: intent.reply,
             kind: 'local',
@@ -311,9 +311,9 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         // 用一条极简的本地 reply 替代 LLM 的回复
         const replyText = intent.special
           ? '✓ 已操作'
-          : (actionLogs.length
+          : (intent.reply || (actionLogs.length
               ? actionLogs.map(l => `✅ ${l}`).join('\n')
-              : '✓ 已处理')
+              : '✓ 已处理'))
 
         const assistantMsg = {
           id: uuid(), role: 'assistant', content: replyText,
@@ -350,13 +350,15 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         .filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
         .slice(-10)
 
+      const agentStartedAt = performance.now()
       const result = await callAgent({
         content, treeText, nodeIds, history, userGoal, model,
         recentSummaries, learnedPatterns, hitRate,
         clientTime: getClientTime(),
         signal: controller.signal,
       })
-      const { reply, actions, thinking, model_used, error, aborted } = result
+      const responseMs = Math.round(performance.now() - agentStartedAt)
+      const { intent, reply, actions, thinking, model_used, usage, usage_cost, error, aborted } = result
 
       // 用户主动停止，静默退出
       if (aborted) return
@@ -418,8 +420,12 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         id: uuid(),
         role: 'assistant',
         content: reply,
+        intent: intent || null,
         thinking: thinking || null,
         model_used: model_used || null,
+        response_ms: responseMs,
+        usage: usage || null,
+        usage_cost: usage_cost || null,
         isError: !!error,
       }
       setMessages(prev => [...prev, assistantMsg])
@@ -430,7 +436,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
           session_id: activeSession,
         })
 
-        if (thinking) {
+        if (intent === 'query' && thinking) {
           // 提取 primary + alternative ids，落到结构化列里方便查询
           const primary = thinking.recommended_primary_id || null
           const alternatives = Array.isArray(thinking.recommended_alternative_ids)

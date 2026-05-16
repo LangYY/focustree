@@ -17,7 +17,9 @@
  *  ctx 提供查询树的辅助函数；不直接依赖 React state
  */
 
-import { flattenTree, findNodeById } from './treeUtils.js'
+import { collectSubtree, flattenTree } from './treeUtils.js'
+
+const SUBTREE_WORDS = '(?:及(?:其)?\\s*)?(?:所有)?(?:(?:子任务|后续|下面|下方|下属|整条分支|整个分支|全部)(?:的)?(?:所有)?(?:任务|节点|项目|内容)?|下(?:的)?(?:所有)?(?:任务|节点|项目|内容)?)'
 
 // ── 工具：在 treeData 里按名字模糊匹配节点 ───────────
 
@@ -25,7 +27,7 @@ import { flattenTree, findNodeById } from './treeUtils.js'
  * 按名字找节点。支持：完全匹配 > 前后缀 > 包含。
  * 返回最佳匹配；找不到返回 null；歧义（多个等强度匹配）返回 { ambiguous: [...] }
  */
-export function findNodeByName(treeData, name, opts = {}) {
+export function findNodeByName(treeData, name) {
   if (!treeData || !name) return null
   const target = name.trim()
   if (!target) return null
@@ -61,6 +63,13 @@ function ambiguousReply(name, candidates) {
 
 function notFoundReply(name) {
   return `没找到名字含「${name}」的节点。可能拼错了，或它还没建。`
+}
+
+function subtreeReply(rootName, count, actionText) {
+  const childCount = Math.max(0, count - 1)
+  return childCount
+    ? `已将「${rootName}」及 ${childCount} 个子节点${actionText}。`
+    : `已将「${rootName}」${actionText}。`
 }
 
 // ── 解析器集合：每个返回 { matched: bool, actions, reply } ────
@@ -141,22 +150,22 @@ function parseStatus(text, treeData) {
   // 完成
   let m = text.match(/^(?:把\s*)?(?:「|『)?(.+?)(?:」|』)?\s*(?:做完|做好|完成|搞定|搞完)了?$/)
   if (!m) m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*标(?:记)?(?:为)?\s*(?:完成|搞定)$/)
-  if (m) return statusAction(treeData, m[1], 'done', '完成')
+  if (m) return statusAction(treeData, m[1], 'done')
 
   // 暂停 / 搁置
   m = text.match(/^(?:暂停|搁置|先放|放放|hold)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/i)
   if (!m) m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*(?:暂停|搁置|先放一放|hold)$/i)
-  if (m) return statusAction(treeData, m[1], 'dormant', '暂停')
+  if (m) return statusAction(treeData, m[1], 'dormant')
 
   // 恢复
   m = text.match(/^(?:恢复|继续做|重启)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/)
   if (!m) m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*(?:恢复|重启|继续)(?:进行)?$/)
-  if (m) return statusAction(treeData, m[1], 'active', '进行中')
+  if (m) return statusAction(treeData, m[1], 'active')
 
   return { matched: false }
 }
 
-function statusAction(treeData, name, status, label) {
+function statusAction(treeData, name, status) {
   name = name.trim()
   if (!name || name.length > 40) return { matched: false }
   const found = findNodeByName(treeData, name)
@@ -169,7 +178,76 @@ function statusAction(treeData, name, status, label) {
 }
 
 /**
- * 3. 删除
+ * 2b. 批量状态：明确要求把某节点及其后续/子任务一起切状态。
+ *
+ *   「暂停 X 及子任务」/「把 X 下所有任务标完成」/「恢复 X 整条分支」
+ */
+function parseStatusSubtree(text, treeData) {
+  let m = text.match(new RegExp(`^(?:把|将)?\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*(?:都)?\\s*(?:标(?:记)?(?:为)?\\s*)?(完成|做完|搞定|暂停|搁置|恢复|重启|继续)(?:进行)?\\s*$`))
+  if (!m) {
+    m = text.match(new RegExp(`^(完成|做完|搞定|暂停|搁置|恢复|重启|继续)\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*$`))
+    if (m) m = [m[0], m[2], m[1]]
+  }
+  if (!m) return { matched: false }
+
+  const name = m[1].trim()
+  if (!name || name.length > 60) return { matched: false }
+
+  const found = findNodeByName(treeData, name)
+  if (!found) return { matched: true, reply: notFoundReply(name) }
+  if (found.ambiguous) return { matched: true, reply: ambiguousReply(name, found.ambiguous) }
+
+  const statusWord = m[2]
+  const status = /完成|做完|搞定/.test(statusWord)
+    ? 'done'
+    : /恢复|重启|继续/.test(statusWord)
+      ? 'active'
+      : 'dormant'
+  const label = status === 'done'
+    ? '标记为完成'
+    : status === 'active'
+      ? '恢复为进行中'
+      : '标记为暂停'
+
+  const nodes = collectSubtree(treeData, found.id).filter(n => n.type !== 'root')
+  if (!nodes.length) return { matched: false }
+
+  return {
+    matched: true,
+    reply: subtreeReply(found.name, nodes.length, label),
+    actions: nodes.map(n => ({ type: `mark_${status}`, id: n.id, name: n.name })),
+  }
+}
+
+/**
+ * 3. 删除整条分支
+ *
+ *   「删除 X 及子任务」/「把 X 整条分支删掉」
+ */
+function parseDeleteSubtree(text, treeData) {
+  let m = text.match(new RegExp(`^(?:删除|删掉|删|清除)\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*$`))
+  if (!m) {
+    m = text.match(new RegExp(`^(?:把|将)\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*(?:删(?:除|掉|了)?|清除)\\s*$`))
+  }
+  if (!m) return { matched: false }
+
+  const name = m[1].trim()
+  if (!name || name.length > 60) return { matched: false }
+
+  const found = findNodeByName(treeData, name)
+  if (!found) return { matched: true, reply: notFoundReply(name) }
+  if (found.ambiguous) return { matched: true, reply: ambiguousReply(name, found.ambiguous) }
+
+  const nodes = collectSubtree(treeData, found.id).filter(n => n.type !== 'root')
+  return {
+    matched: true,
+    reply: subtreeReply(found.name, nodes.length || 1, '删除'),
+    actions: [{ type: 'delete', id: found.id, name: found.name }],
+  }
+}
+
+/**
+ * 4. 删除
  *
  *   「删除 X / 删掉 X / 把 X 删了」
  */
@@ -189,7 +267,7 @@ function parseDelete(text, treeData) {
 }
 
 /**
- * 4. 重命名
+ * 5. 重命名
  *
  *   「把 X 改名为 Y」/「X 改名 Y」/「重命名 X 为 Y」
  */
@@ -210,7 +288,7 @@ function parseRename(text, treeData) {
 }
 
 /**
- * 5. 清空全部
+ * 6. 清空全部
  */
 function parseClearAll(text) {
   if (/^(?:清空|清除|删除)\s*(?:全部|所有|整棵|这棵)\s*(?:项目|树|节点)?\s*$/.test(text) ||
@@ -221,9 +299,9 @@ function parseClearAll(text) {
 }
 
 /**
- * 6. 展开 / 折叠（本地操作，不写 action，直接返回 special kind）
+ * 7. 展开 / 折叠（本地操作，不写 action，直接返回 special kind）
  */
-function parseExpandCollapse(text, treeData) {
+function parseExpandCollapse(text) {
   if (/^(?:展开|打开)\s*(?:全部|所有)\s*$/.test(text)) {
     return { matched: true, special: 'expandAll' }
   }
@@ -250,7 +328,9 @@ export function classifyIntent(text, treeData) {
   const tryParsers = [
     parseClearAll,
     parseExpandCollapse,
+    parseDeleteSubtree,
     parseDelete,
+    parseStatusSubtree,
     parseStatus,
     parseRename,
     parseAdd,

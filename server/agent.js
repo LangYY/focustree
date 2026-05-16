@@ -62,9 +62,11 @@ export async function runAgent({
       ? systemPrompt + `\n\n## 系统重试提示（第 ${attempt + 1}/${MAX_RETRIES} 次）\n上一轮输出无效：${lastError}\n请严格按 Schema 重新生成合法 JSON。`
       : systemPrompt
 
+    let llmResult
     let raw
     try {
-      raw = await callLLM(effectivePrompt, messages, apiKey, modelName, provider, signal)
+      llmResult = await callLLM(effectivePrompt, messages, apiKey, modelName, provider, signal)
+      raw = llmResult.content
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
@@ -92,7 +94,12 @@ export async function runAgent({
     }
 
     console.log(`[agent] success on attempt ${attempt + 1}, model=${modelName}, intent=${normalized.intent}, actions=${normalized.actions.length}, has_thinking=${!!normalized.thinking}`)
-    return { ...normalized, model_used: modelName }
+    return {
+      ...normalized,
+      model_used: modelName,
+      usage: llmResult.usage || null,
+      usage_cost: llmResult.usageCost || null,
+    }
   }
 
   const failMsg = lastError
@@ -124,23 +131,29 @@ function resolveModel(mode, message, provider = 'deepseek') {
   if (mode === 'chat')     return chatModel
   if (mode === 'reasoner') return reasonerModel
 
-  // auto 模式：除了简单"操作"型指令（添加/标完成/重命名/删除），其它一律走 V4-pro
-  // 反向白名单更稳：明确判定为"纯操作"才用 flash，模糊就用 pro
+  // auto 模式质量优先：只有短而明确的纯操作才用 flash，任何需要理解、拆解、规划的输入都用 pro。
   const msg = message.trim()
 
   // 1. 极短 + 非问句 → 可能是测试或填充 → flash
   if (msg.length < 4 && !/[?？]/.test(msg)) return chatModel
 
-  // 2. 纯命令式（含明确操作动词 + 不带反思/推理词 + 不是问句）
+  // 2. 长文本、批量描述、项目梳理天然需要结构判断 → pro
+  const hasLongContext = msg.length > 80 || /\n|[；;]/.test(msg) || /(?:^|\n)\s*(?:\d+[.、]|[-*])/.test(msg)
+  if (hasLongContext) return reasonerModel
+
+  // 3. 任何"帮我理解/整理/判断"都用 pro，即使里面出现"添加/创建"等操作动词。
+  const qualityWords = /(梳理|整理|拆解|归类|分类|层级|结构|规划|计划|策略|分析|判断|评估|建议|推荐|优先|权衡|取舍|路线|方案|目标|现金流|变现|复盘|总结|帮我|怎么看|怎么做|为什么|要不要|该不该|值得|想做)/
+  if (qualityWords.test(msg)) return reasonerModel
+
+  // 4. 纯命令式（含明确操作动词 + 不带反思/推理词 + 不是问句）
   //    用"含有"而非"开头"，覆盖"在 X 下添加 Y"这种位置在中间的指令
   const actionVerbs    = /(添加|加任务|加分类|新建|创建|删除|删掉|重命名|改名为|标记|做完了|完成了|暂停|搁置|清空|清除)/
-  const reasoningWords = /(建议|推荐|该|应该|为什么|怎么|哪个|哪些|分析|思考|规划|策略|优先|值得|要不要|该不该|做什么|做啥|做设么|做点啥|想做)/
   const isQuestion     = /[?？]/.test(msg)
-  if (actionVerbs.test(msg) && !reasoningWords.test(msg) && !isQuestion) {
+  if (actionVerbs.test(msg) && !isQuestion) {
     return chatModel
   }
 
-  // 3. 其他一切（问句 / 推理词 / 较长输入 / 不确定）→ V4-pro
+  // 5. 其他一切（问句 / 推理词 / 较长输入 / 不确定）→ V4-pro
   return reasonerModel
 }
 
@@ -166,7 +179,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
   // 学习模式限制最近 10 条，避免 prompt 膨胀
   const learnedBlock = formatLearnedBlock((learnedPatterns || []).slice(-10))
 
-  return `你是「专注树」AI 助理。风格：简洁、克制、不啰嗦。行动确认一句话收住（≤30字），不要展开解释。只在用户主动询问时才给建议。你的唯一输出必须是合法 JSON，不得包含任何额外文字、markdown 代码块或注释。
+  return `你是「专注树」AI 助理。风格：简洁、克制、有判断力。不写空泛鼓励，但要给出真实取舍和结构化判断。纯操作确认一句话收住；复杂梳理、规划、推荐要说清楚为什么。你的唯一输出必须是合法 JSON，不得包含任何额外文字、markdown 代码块或注释。
 
 ## 状态来源优先级（最重要的规则）
 1. 下方 ## 当前项目树 块是**此刻的唯一真实状态**——以它为准。
@@ -180,8 +193,12 @@ ${trimmedTree}
 ## 输出 Schema（必须严格遵守）
 {
   "intent": "action" | "query" | "idea",
-  "reply": "中文回复。纯操作确认（标记/添加/删除等）一句话 ≤30字，不要加总结或鼓励。推荐/回答 ≤100字。推荐类问题才在末尾标注 [对齐目标] 或 [偏离目标] <原因>，其余情况不标。引用任务写「任务名」，不要写 (id:xxx)，id 放 thinking 字段。",
-  "thinking": {                  // ← 推荐/优先级/规划类问题必须输出，越具体越好
+  "reply": "中文回复。纯操作确认（标记/添加/删除等）一句话 ≤30字，不要加总结或鼓励。复杂梳理/整理到树/规划/推荐可写 120-220 字；先用一句「我的判断：...」简短说明整理逻辑，再说已落到哪些主线、哪些重复已合并、哪些暂缓。推荐类问题才在末尾标注 [对齐目标] 或 [偏离目标] <原因>，其余情况不标。引用任务写「任务名」，不要写 (id:xxx)，id 放 thinking 字段。",
+  "thinking": {                  // ← 推荐/优先级/规划/复杂整理类问题必须输出，越具体越好
+    "brief_rationale":          "<给用户看的简短思考过程：1-2 句，只讲判断依据和取舍，不展开长链路>",
+    "preserved_inputs":         ["<用户提到且被保留下来的主线/任务，去重后列出>"],
+    "merged_duplicates":        ["<被合并的重复/同义项，格式：A/B → C；无则空数组>"],
+    "deferred_or_unsure":       ["<因信息不足、超过本轮节点上限或不确定而暂未展开的内容；无则空数组>"],
     "user_goal":                "<复述用户当前阶段目标，一句话>",
     "tradeoff_analysis":        "<为什么选 A 而不是 B/C？至少对比 2 个真实候选，给出权衡，一段话>",
     "traps_avoided":            ["<识别到的陷阱，每条具体到机制，不要套话>"],
@@ -223,6 +240,17 @@ ${trimmedTree}
 - action：用户明确要修改树（完成/添加/删除/重命名/打标签）
 - query：咨询、询问建议、问现在该做什么
 - idea：用户在记录想法或灵感，暂时不需要操作树
+
+## 复杂整理 / 建树质量规则
+当用户发送一段项目描述并要求你“梳理、整理、拆解、规划、放到树上”时：
+- 覆盖性优先：用户明确说到的非重复内容，必须进入 actions，或写入 thinking.deferred_or_unsure 说明为何暂不展开；不能静默丢弃。
+- 不自作主张改写用户意图。可以理解、归纳、补足上下位关系，但不能把用户没说的目标当成事实。
+- 允许删去重复项：同义/重复内容只建一个节点，并在 thinking.merged_duplicates 里说明如何合并。
+- 先识别真实顶层项目，不要把所有名词都建成平级项目；一个顶层项目下面最多先建 2-4 个关键 category/task，宁可少而准。
+- reply 要有重点、有条理：一句判断逻辑 + 2-4 条主线 + 合并/暂缓说明。不要只说「已添加」。
+- thinking.brief_rationale 要给用户一眼能懂的简短思考过程，但不要输出长篇链式推理。
+- actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations 和 weight。
+- 不确定的信息不要硬编，放成较粗颗粒的 category，等用户补充后再细化。
 
 ## 「我该做什么 / 优先级 / 规划」类问题的核心规则
 
@@ -397,7 +425,14 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 输入（用户发来一段项目描述）：「我的B站频道在做熊猫团团系列，要写脚本、画分镜、配音。同时在找工作，要更新简历和刷算法题。还有一个副业接外包。」
 输出: {
   "intent":"action",
-  "reply":"已按层级建好：B站频道 > 熊猫团团（3个任务），求职（2个任务），副业接外包。",
+  "reply":"我的判断：这段话其实是三条主线，不适合全部铺平成任务。已建「B站频道」>「熊猫团团」（写脚本、画分镜、配音），「求职」（更新简历、刷算法题），以及「副业接外包」。副业细节先不拆，等你补充客户/交付再细化。",
+  "thinking":{
+    "brief_rationale":"我把长期内容生产、求职和现金型副业拆成三条主线；每条只保留当前最可执行的节点，避免面板一上来过载。",
+    "preserved_inputs":["B站频道","熊猫团团系列","写脚本","画分镜","配音","找工作","更新简历","刷算法题","副业接外包"],
+    "merged_duplicates":[],
+    "deferred_or_unsure":["副业接外包暂未拆成具体任务，因为还缺客户、报价或交付物信息"],
+    "user_goal":"把当前混乱项目整理成可执行面板"
+  },
   "actions":[
     {"type":"add_project","name":"B站频道","color":"#4A8C5C"},
     {"type":"add_category","name":"熊猫团团","parent":"B站频道"},
@@ -451,7 +486,7 @@ ${lines.join('\n')}
  */
 function formatTimeBlock(clientTime) {
   if (!clientTime) return ''
-  const { weekday, hour, period, iso } = clientTime
+  const { weekday, hour, period } = clientTime
   const guidance = {
     '清晨':   '用户精力刚起步，适合温和启动型任务或规划',
     '上午':   '高专注黄金时段，优先安排创意/思考密集的核心任务',
@@ -592,7 +627,11 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, provider, sign
   }
 
   const data = await postChatCompletion(provider, body, { apiKey, signal })
-  return data.choices?.[0]?.message?.content || ''
+  return {
+    content: data.choices?.[0]?.message?.content || '',
+    usage: data.usage || null,
+    usageCost: data.usage_cost || null,
+  }
 }
 
 // ── 解析与校验 ────────────────────────────────────────
@@ -613,7 +652,10 @@ function normalizeOutput(data) {
   const actions = (data.actions || []).map(a => {
     const id = a.id || a.task_id || a.node_id || a.nodeId || a.taskId
     const parent = a.parent || a.parent_id || a.parentId
-    return { ...a, id, parent }
+    const annotations = normalizeAnnotations(a.annotations)
+    const normalized = { ...a, id, parent }
+    if (annotations) normalized.annotations = annotations
+    return normalized
   })
   return {
     intent:   data.intent,
@@ -621,6 +663,29 @@ function normalizeOutput(data) {
     thinking: data.thinking || null,
     actions,
   }
+}
+
+function normalizeAnnotations(ann) {
+  if (!ann || typeof ann !== 'object') return null
+  const next = { ...ann }
+
+  if (next.time_horizon && !VALID_TIME_HORIZON.includes(next.time_horizon)) delete next.time_horizon
+  if (next.energy_cost && !VALID_ENERGY_COST.includes(next.energy_cost)) delete next.energy_cost
+  if (next.risk && !VALID_RISK.includes(next.risk)) delete next.risk
+  if (next.strategic_tag && !VALID_STRATEGIC_TAG.includes(next.strategic_tag)) delete next.strategic_tag
+
+  if (next.feasibility !== undefined) {
+    const value = typeof next.feasibility === 'string'
+      ? Number(next.feasibility)
+      : next.feasibility
+    if (Number.isFinite(value)) {
+      next.feasibility = Math.max(0, Math.min(1, value))
+    } else {
+      delete next.feasibility
+    }
+  }
+
+  return next
 }
 
 /**
@@ -647,10 +712,10 @@ function validateOutput(data, nodeIdSet) {
     return { ok: false, errors }
   }
 
-  // 同批次内新建的 project/category 名称，可作为后续 action 的 parent 引用
+  // 同批次内新建的节点名称，可作为后续 action 的 parent 引用
   const newSiblingNames = new Set()
   for (const a of data.actions) {
-    if ((a.type === 'add_project' || a.type === 'add_category') && a.name) {
+    if ((a.type === 'add_project' || a.type === 'add_category' || a.type === 'add_task') && a.name) {
       newSiblingNames.add(a.name)
     }
   }

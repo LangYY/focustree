@@ -31,6 +31,26 @@ function formatModelLabel(modelUsed) {
   return modelUsed
 }
 
+function formatResponseTime(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+}
+
+function formatCost(cost) {
+  if (!cost || typeof cost.amount !== 'number' || !Number.isFinite(cost.amount)) return ''
+  const symbol = cost.currency === 'CNY' ? '¥' : '$'
+  if (cost.amount < 0.0001) return `${symbol}${cost.amount.toFixed(6)}`
+  if (cost.amount < 0.01) return `${symbol}${cost.amount.toFixed(5)}`
+  return `${symbol}${cost.amount.toFixed(4)}`
+}
+
+function formatTokenCount(usage) {
+  const total = usage?.total_tokens
+  if (typeof total !== 'number' || !Number.isFinite(total)) return ''
+  return `${total.toLocaleString()} tok`
+}
+
 /**
  * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
@@ -82,10 +102,13 @@ function ThinkingCard({ thinking }) {
   const [open, setOpen] = useState(false)
   if (!thinking || typeof thinking !== 'object') return null
   const {
+    brief_rationale, preserved_inputs, merged_duplicates, deferred_or_unsure,
     user_goal, tradeoff_analysis, traps_avoided, leverage_insight,
     next_concrete_step, success_criterion, risk_if_skipped,
   } = thinking
-  const hasContent = user_goal || tradeoff_analysis || traps_avoided?.length ||
+  const hasStructuring = brief_rationale || preserved_inputs?.length ||
+                         merged_duplicates?.length || deferred_or_unsure?.length
+  const hasContent = hasStructuring || user_goal || tradeoff_analysis || traps_avoided?.length ||
                      leverage_insight || next_concrete_step || success_criterion || risk_if_skipped
   if (!hasContent) return null
 
@@ -95,10 +118,22 @@ function ThinkingCard({ thinking }) {
         onClick={() => setOpen(o => !o)}
         className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
       >
-        {open ? '[-]' : '[+]'} 为什么这样推荐
+        {open ? '[-]' : '[+]'} {hasStructuring ? '为什么这样整理' : '为什么这样推荐'}
       </button>
       {open && (
         <div className="mt-1.5 p-2.5 bg-gray-950/60 border border-gray-800 rounded-lg space-y-2 text-[11px] leading-relaxed">
+          {brief_rationale && (
+            <Row label="判断" value={brief_rationale} valueColor="text-gray-300" multi />
+          )}
+          {Array.isArray(preserved_inputs) && preserved_inputs.length > 0 && (
+            <ListRow label="保留" items={preserved_inputs} valueColor="text-emerald-300" />
+          )}
+          {Array.isArray(merged_duplicates) && merged_duplicates.length > 0 && (
+            <ListRow label="合并" items={merged_duplicates} valueColor="text-blue-300" />
+          )}
+          {Array.isArray(deferred_or_unsure) && deferred_or_unsure.length > 0 && (
+            <ListRow label="暂缓" items={deferred_or_unsure} valueColor="text-amber-300" />
+          )}
           {user_goal && (
             <Row label="目标" value={user_goal} valueColor="text-gray-300" />
           )}
@@ -129,6 +164,19 @@ function ThinkingCard({ thinking }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ListRow({ label, items, valueColor = 'text-gray-300' }) {
+  return (
+    <div>
+      <div className="text-gray-500 mb-0.5">{label}</div>
+      <ul className="space-y-0.5 pl-1">
+        {items.map((item, i) => (
+          <li key={i} className={valueColor}>· {item}</li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -179,7 +227,7 @@ function GoalBanner({ goalText, goalExpired, onEdit, onClear }) {
 }
 
 const MODEL_OPTIONS = [
-  { value: 'auto',     label: '自动',  hint: '简单操作用快速，推荐/思考用深度' },
+  { value: 'auto',     label: '自动',  hint: '质量优先：复杂梳理/规划用深度，短操作用快速' },
   { value: 'chat',     label: '快速',  hint: 'DeepSeek V4-flash · 便宜快' },
   { value: 'reasoner', label: '深度',  hint: 'DeepSeek V4-pro · 推理强' },
 ]
@@ -406,8 +454,17 @@ export default function ChatPanel({
                   <ThinkingCard thinking={msg.thinking} />
                 )}
                 {msg.role === 'assistant' && msg.model_used && (
-                  <div className="mt-1 text-[10px] text-gray-500">
+                  <div
+                    className="mt-1 text-[10px] text-gray-500"
+                    title={msg.usage_cost
+                      ? `输入 ${msg.usage_cost.prompt_tokens || 0} tokens（缓存 ${msg.usage_cost.cached_input_tokens || 0}，未命中 ${msg.usage_cost.uncached_input_tokens || 0}），输出 ${msg.usage_cost.completion_tokens || 0} tokens`
+                      : undefined
+                    }
+                  >
                     {formatModelLabel(msg.model_used)}
+                    {formatResponseTime(msg.response_ms) && ` · ${formatResponseTime(msg.response_ms)}`}
+                    {formatCost(msg.usage_cost) && ` · ${formatCost(msg.usage_cost)}`}
+                    {formatTokenCount(msg.usage) && ` · ${formatTokenCount(msg.usage)}`}
                   </div>
                 )}
                 {msg.role === 'assistant' && msg.kind === 'local' && (
