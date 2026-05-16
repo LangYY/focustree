@@ -569,7 +569,9 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, signal) {
     model: modelName,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     // V4-pro 的 reasoning_content 占用 token 预算。大段输入可能触发大量 actions（如批量创建节点），需留足空间
-    max_tokens: isPro ? 16000 : 1200,
+    // V4-flash 现在也是推理模型，reasoning_content 会吃 token；
+    // 配上 agent 的庞大 system prompt 经常爆 1200。提到 4000 留出余量。
+    max_tokens: isPro ? 16000 : 4000,
   }
   // pro 模型内置推理，不需要 temperature 也不接受 response_format；flash 用低温 + json_object 确保格式
   if (!isPro) {
