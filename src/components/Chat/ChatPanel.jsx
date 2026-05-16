@@ -102,11 +102,14 @@ function ThinkingCard({ thinking }) {
   const [open, setOpen] = useState(false)
   if (!thinking || typeof thinking !== 'object') return null
   const {
-    brief_rationale, preserved_inputs, merged_duplicates, deferred_or_unsure,
+    brief_rationale, situation_map, assumptions, open_questions, proposed_panel_changes,
+    preserved_inputs, merged_duplicates, deferred_or_unsure,
     user_goal, tradeoff_analysis, traps_avoided, leverage_insight,
     next_concrete_step, success_criterion, risk_if_skipped,
   } = thinking
-  const hasStructuring = brief_rationale || preserved_inputs?.length ||
+  const hasStructuring = brief_rationale || situation_map?.length ||
+                         assumptions?.length || open_questions?.length ||
+                         proposed_panel_changes?.length || preserved_inputs?.length ||
                          merged_duplicates?.length || deferred_or_unsure?.length
   const hasContent = hasStructuring || user_goal || tradeoff_analysis || traps_avoided?.length ||
                      leverage_insight || next_concrete_step || success_criterion || risk_if_skipped
@@ -124,6 +127,18 @@ function ThinkingCard({ thinking }) {
         <div className="mt-1.5 p-2.5 bg-gray-950/60 border border-gray-800 rounded-lg space-y-2 text-[11px] leading-relaxed">
           {brief_rationale && (
             <Row label="判断" value={brief_rationale} valueColor="text-gray-300" multi />
+          )}
+          {Array.isArray(situation_map) && situation_map.length > 0 && (
+            <ListRow label="局面" items={situation_map} valueColor="text-gray-300" />
+          )}
+          {Array.isArray(proposed_panel_changes) && proposed_panel_changes.length > 0 && (
+            <ListRow label="面板建议" items={proposed_panel_changes} valueColor="text-blue-300" />
+          )}
+          {Array.isArray(assumptions) && assumptions.length > 0 && (
+            <ListRow label="假设" items={assumptions} valueColor="text-gray-400" />
+          )}
+          {Array.isArray(open_questions) && open_questions.length > 0 && (
+            <ListRow label="待确认" items={open_questions} valueColor="text-amber-300" />
           )}
           {Array.isArray(preserved_inputs) && preserved_inputs.length > 0 && (
             <ListRow label="保留" items={preserved_inputs} valueColor="text-emerald-300" />
