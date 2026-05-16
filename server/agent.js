@@ -48,6 +48,7 @@ export async function runAgent({
   const systemPrompt = buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime)
   const modelName = resolveModel(model, message, provider)
   let lastError = null
+  let lastErrorKind = null
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     if (signal?.aborted) {
@@ -62,25 +63,35 @@ export async function runAgent({
       ? systemPrompt + `\n\n## 系统重试提示（第 ${attempt + 1}/${MAX_RETRIES} 次）\n上一轮输出无效：${lastError}\n请严格按 Schema 重新生成合法 JSON。`
       : systemPrompt
 
+    const attemptModel = resolveAttemptModel(modelName, provider, attempt, lastErrorKind)
     let llmResult
     let raw
     try {
-      llmResult = await callLLM(effectivePrompt, messages, apiKey, modelName, provider, signal)
+      llmResult = await callLLM(effectivePrompt, messages, apiKey, attemptModel, provider, signal)
       raw = llmResult.content
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
-        return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, aborted: true }
+        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, aborted: true }
       }
       lastError = `API 调用失败：${err.message}`
-      console.warn(`[agent] attempt ${attempt + 1} API error:`, err.message)
+      lastErrorKind = 'api'
+      console.warn(`[agent] attempt ${attempt + 1} API error, model=${attemptModel}:`, err.message)
+      continue
+    }
+
+    if (!raw?.trim()) {
+      lastError = `模型返回空内容（model=${attemptModel}, finish_reason=${llmResult.finishReason || 'unknown'}）`
+      lastErrorKind = 'empty_content'
+      console.warn(`[agent] attempt ${attempt + 1} empty content, model=${attemptModel}, finish_reason=${llmResult.finishReason || 'unknown'}`)
       continue
     }
 
     const parseResult = safeParseJSON(raw)
     if (!parseResult.ok) {
-      lastError = `JSON 解析失败：${parseResult.error}。你的原始输出是：${raw.slice(0, 200)}`
-      console.warn(`[agent] attempt ${attempt + 1} parse error:`, lastError)
+      lastError = `JSON 解析失败：${parseResult.error}。原始输出片段：${raw.slice(0, 200)}`
+      lastErrorKind = 'parse'
+      console.warn(`[agent] attempt ${attempt + 1} parse error, model=${attemptModel}:`, lastError)
       continue
     }
 
@@ -89,22 +100,25 @@ export async function runAgent({
     const validation = validateOutput(normalized, nodeIdSet)
     if (!validation.ok) {
       lastError = `输出校验失败：${validation.errors.join('；')}。请严格按格式重新生成。`
-      console.warn(`[agent] attempt ${attempt + 1} validation error:`, validation.errors)
+      lastErrorKind = 'validation'
+      console.warn(`[agent] attempt ${attempt + 1} validation error, model=${attemptModel}:`, validation.errors)
       continue
     }
 
-    console.log(`[agent] success on attempt ${attempt + 1}, model=${modelName}, intent=${normalized.intent}, actions=${normalized.actions.length}, has_thinking=${!!normalized.thinking}`)
+    console.log(`[agent] success on attempt ${attempt + 1}, model=${attemptModel}, intent=${normalized.intent}, actions=${normalized.actions.length}, has_thinking=${!!normalized.thinking}`)
     return {
       ...normalized,
-      model_used: modelName,
+      model_used: attemptModel,
       usage: llmResult.usage || null,
       usage_cost: llmResult.usageCost || null,
     }
   }
 
-  const failMsg = lastError
-    ? `抱歉，没能完成这个操作。（${lastError.slice(0, 80)}）`
-    : '抱歉，没能完成这个操作，换个说法试试？'
+  const failMsg = ['empty_content', 'parse'].includes(lastErrorKind)
+    ? '这次模型没有返回完整的结构化结果，我没有改动面板。可以再发一次，或先让我只做梳理不落节点。'
+    : lastError
+      ? `抱歉，没能完成这个操作。（${lastError.slice(0, 80)}）`
+      : '抱歉，没能完成这个操作，换个说法试试？'
   console.error('[agent] all attempts failed:', lastError)
   return {
     intent: 'query',
@@ -155,6 +169,18 @@ function resolveModel(mode, message, provider = 'deepseek') {
 
   // 5. 其他一切（问句 / 推理词 / 较长输入 / 不确定）→ V4-pro
   return reasonerModel
+}
+
+function resolveAttemptModel(primaryModel, provider, attempt, lastErrorKind) {
+  if (attempt === 0) return primaryModel
+  if (!['empty_content', 'parse'].includes(lastErrorKind)) return primaryModel
+
+  const isOpenAI = provider === 'openai'
+  const jsonStableModel = isOpenAI
+    ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
+    : 'deepseek-v4-flash'
+
+  return jsonStableModel
 }
 
 // ── Prompt 构建 ───────────────────────────────────────
@@ -659,18 +685,29 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, provider, sign
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     // V4-pro 的 reasoning_content 占用 token 预算。大段输入可能触发大量 actions（如批量创建节点），需留足空间
     // V4-flash 现在也是推理模型，reasoning_content 会吃 token；
-    // 配上 agent 的庞大 system prompt 经常爆 1200。提到 4000 留出余量。
-    max_tokens: isPro ? 16000 : 4000,
+    // 配上 agent 的庞大 system prompt 经常爆 1200。提到 8000 留出余量。
+    max_tokens: isPro ? 16000 : 8000,
   }
-  // pro 模型内置推理，不需要 temperature 也不接受 response_format；flash 用低温 + json_object 确保格式
-  if (!isDeepSeek || !isPro) {
-    body.temperature = 0.3
+
+  // DeepSeek 官方建议 JSON Output 显式设置 response_format，但也说明可能偶发空 content。
+  // 实测 V4-pro 对当前长 system prompt 更容易触发空 content；因此 pro 先靠 prompt 约束，
+  // JSON 模式留给更稳定的 flash/OpenAI 路径，必要时由 runAgent 自动降级重试。
+  if (!isDeepSeek || !isPro || process.env.DEEPSEEK_PRO_JSON_MODE === 'true') {
     body.response_format = { type: 'json_object' }
   }
 
+  // pro 模型内置推理，不接受 temperature；其他模型用低温稳定 JSON。
+  if (!isDeepSeek || !isPro) {
+    body.temperature = 0.3
+  }
+
   const data = await postChatCompletion(provider, body, { apiKey, signal })
+  const choice = data.choices?.[0]
+  const message = choice?.message || {}
   return {
-    content: data.choices?.[0]?.message?.content || '',
+    content: message.content || '',
+    reasoningContent: message.reasoning_content || '',
+    finishReason: choice?.finish_reason || null,
     usage: data.usage || null,
     usageCost: data.usage_cost || null,
   }
@@ -680,11 +717,22 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, provider, sign
 
 function safeParseJSON(raw) {
   try {
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
+    const cleaned = extractJSON(raw)
     return { ok: true, data: JSON.parse(cleaned) }
   } catch (e) {
     return { ok: false, error: e.message }
   }
+}
+
+function extractJSON(raw) {
+  const cleaned = (raw || '').replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
+  if (!cleaned) return cleaned
+  if (cleaned.startsWith('{') && cleaned.endsWith('}')) return cleaned
+
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  if (start >= 0 && end > start) return cleaned.slice(start, end + 1)
+  return cleaned
 }
 
 /**
