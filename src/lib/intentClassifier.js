@@ -178,6 +178,37 @@ function statusAction(treeData, name, status) {
 }
 
 /**
+ * 2a. 调整权重
+ *
+ *   「把 X 权重调到 80%」/「X 权重设为 0.8」
+ */
+function parseWeight(text, treeData) {
+  let m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*权重\s*(?:调(?:整)?到|设(?:置)?为|改(?:成|为)?|=|到)\s*([0-9]+(?:\.[0-9]+)?)\s*(%)?\s*$/)
+  if (!m) {
+    m = text.match(/^权重\s*(?:调(?:整)?到|设(?:置)?为|改(?:成|为)?|=|到)\s*([0-9]+(?:\.[0-9]+)?)\s*(%)?\s*(?:给|到|为)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/)
+    if (m) m = [m[0], m[3], m[1], m[2]]
+  }
+  if (!m) return { matched: false }
+
+  const name = m[1].trim()
+  const rawValue = Number(m[2])
+  if (!name || name.length > 60 || !Number.isFinite(rawValue)) return { matched: false }
+
+  let weight = (m[3] || rawValue > 2) ? rawValue / 100 : rawValue
+  weight = Math.max(0, Math.min(2, weight))
+
+  const found = findNodeByName(treeData, name)
+  if (!found) return { matched: true, reply: notFoundReply(name) }
+  if (found.ambiguous) return { matched: true, reply: ambiguousReply(name, found.ambiguous) }
+
+  return {
+    matched: true,
+    reply: `已将「${found.name}」权重调整为 ${Math.round(weight * 100)}%。`,
+    actions: [{ type: 'set_weight', id: found.id, name: found.name, weight }],
+  }
+}
+
+/**
  * 2b. 批量状态：明确要求把某节点及其后续/子任务一起切状态。
  *
  *   「暂停 X 及子任务」/「把 X 下所有任务标完成」/「恢复 X 整条分支」
@@ -330,6 +361,7 @@ export function classifyIntent(text, treeData) {
     parseExpandCollapse,
     parseDeleteSubtree,
     parseDelete,
+    parseWeight,
     parseStatusSubtree,
     parseStatus,
     parseRename,

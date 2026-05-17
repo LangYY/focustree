@@ -15,7 +15,7 @@ const MAX_RETRIES = 3
 const VALID_TYPES = [
   'mark_done', 'mark_active', 'mark_dormant',
   'add_task', 'add_category', 'add_project',
-  'rename', 'delete', 'clear_all',
+  'rename', 'delete', 'clear_all', 'set_weight',
   'annotate',                     // 给已有节点打/改策略标签
   'remember',                     // 写入 learned_patterns（长期画像）
 ]
@@ -233,6 +233,9 @@ ${trimmedTree}
     "assumptions":              ["<为了整理而做的轻量假设；不确定就写进 open_questions>"],
     "open_questions":           ["<最影响下一步结构的 0-3 个问题，不要问无关细节>"],
     "proposed_panel_changes":   ["<如果本轮不直接改树，这里写建议加到面板的节点/层级；如果已 actions 落地，也可写已落地摘要>"],
+    "goal_usage_mode":          "background" | "priority_filter" | "ignored",
+    "goal_usage_reason":        "<本轮为什么这样使用阶段目标：只作背景 / 用来排序 / 不使用>",
+    "branch_weight_proposals":  [{"name":"<项目/分支名>","current_weight":0-2|null,"suggested_weight":0-2,"reason":"<为什么是这个权重>","confidence":0-1,"requires_confirmation":true}],
     "preserved_inputs":         ["<用户提到且被保留下来的主线/任务，去重后列出>"],
     "merged_duplicates":        ["<被合并的重复/同义项，格式：A/B → C；无则空数组>"],
     "deferred_or_unsure":       ["<因信息不足、超过本轮节点上限或不确定而暂未展开的内容；无则空数组>"],
@@ -259,6 +262,7 @@ ${trimmedTree}
 { "type": "rename",       "id": "...", "name": "..." }
 { "type": "delete",       "id": "...", "name": "..." }
 { "type": "clear_all" }
+{ "type": "set_weight",   "id": "...", "name": "...", "weight": 0.0-2.0 }          // 仅用户明确要求/确认调整权重时使用
 { "type": "annotate",     "id": "...", "annotations": {...} }                       // 给已有节点打/改标签
 { "type": "remember",     "observation": "<一句话事实>", "confidence": 0.0-1.0, "topic": "<分类标签>" }  // 记入长期画像
 
@@ -282,10 +286,17 @@ ${trimmedTree}
 当用户抛出一堆正在梳理、让他困惑的事情时：
 - 先把信息整理成 situation_map：主线、冲突、约束、卡点，而不是立刻把每个名词变成节点。
 - 明确区分：用户明说的事实、你为了推进整理做的假设、仍需确认的问题。
+- 阶段目标此时只作为背景，不得为了贴合目标删改、弱化、替换用户正在表达的真实意图。thinking.goal_usage_mode 应为 "background" 或 "ignored"。
 - reply 先给一个短判断，再给 2-4 条有重点的结构，不要平均用力。
 - 如果用户没明确要求改面板，actions 必须为空；用 proposed_panel_changes 给出建议结构，并用一句话询问是否落到面板。
 - 如果用户明确要求转成面板任务，actions 可以落地，但仍要在 reply/thinking 里说明整理逻辑，不能只说“已添加”。
 - 可执行任务应使用“动词 + 对象”的颗粒度，如“写第2集冷开场”优于“内容创作”；不确定项先做 category 或 deferred_or_unsure。
+
+## 阶段目标的使用边界
+- 目标不是用来改写用户意图的。用户在梳理全局、倾诉混乱、整理项目时，必须先忠实保留用户说的内容；目标最多帮助你标注“这条线可能更靠近/更远离目标”，不能因此删掉或压扁其他线。
+- 只有当用户问“今天该做什么 / 最近以什么为重点 / 哪个优先 / 要不要做 X / 给我排序”时，目标才作为 priority_filter，明显影响推荐、排序和取舍。
+- 如果用户明确说“暂时不考虑目标 / 先完整梳理 / 不要替我取舍”，目标应设为 ignored。
+- reply 里不要动不动把话题拉回目标。只有推荐/排序类问题才标注 [对齐目标] 或 [偏离目标]。
 
 ## 复杂整理 / 建树质量规则
 当用户发送一段项目描述并要求你“梳理、整理、拆解、规划、放到树上”时：
@@ -295,7 +306,7 @@ ${trimmedTree}
 - 先识别真实顶层项目，不要把所有名词都建成平级项目；一个顶层项目下面最多先建 2-4 个关键 category/task，宁可少而准。
 - reply 要有重点、有条理：一句判断逻辑 + 2-4 条主线 + 合并/暂缓说明。不要只说「已添加」。
 - thinking.brief_rationale 要给用户一眼能懂的简短思考过程，但不要输出长篇链式推理。
-- actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations 和 weight。
+- actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations。不要擅自设置非默认 weight，除非用户明确要求“按优先级/权重建”。
 - 不确定的信息不要硬编，放成较粗颗粒的 category，等用户补充后再细化。
 
 ## 「我该做什么 / 优先级 / 规划」类问题的核心规则
@@ -314,8 +325,15 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 树中每个节点后都有 (w:N%) 表示权重百分比。权重越高，节点越重要，链接线越粗。
 - 权重由用户在创建项目时确认或后续调整，反映项目对目标的战略优先级
 - 推荐优先推高权重节点下的活跃 task，同等条件下权重高的排前面
-- 创建项目时主动提出建议权重让用户确认，格式例如：这个项目权重建议 80%（因为它直接推进你的月入目标）
 - 权重范围 0-100%，默认 100%。低于 30% 的项目仅在用户主动提及时才推荐
+
+## 分支权重协商规则
+- 权重是协商出来的，不是你替用户决定的。除非用户明确说“调整权重 / 按这个权重执行 / 就这样设置”，否则不要发 set_weight action。
+- 梳理全局时，如果出现多个顶层项目/分支，可以在 thinking.branch_weight_proposals 里给“建议权重草案”，并说明依据：目标相关度、时间紧迫度、现金流压力、情绪负担、依赖关系。
+- 权重草案要以“可讨论”为口吻呈现，例如：“我建议先把内容资产 70%、现金流补位 90%、求职安全垫 50%，你更想按现金流还是长期资产来排？”
+- 不要因为当前目标就把不对齐目标的分支压到很低。若用户正在做全局整理，低权重只表示“当前推荐频率低”，不表示“不重要”或“应删除”。
+- 新建项目时默认不写 weight 字段；如果必须表达优先级，放在 branch_weight_proposals 里等用户确认。
+- 用户确认后，才输出 set_weight actions；已有节点必须使用真实 id。
 
 ## remember Action 使用规则（关键！）
 
@@ -384,6 +402,13 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "assumptions":["用户目前最需要的是降低混乱感，而不是一次性塞满面板"],
     "open_questions":["当前最缺的是现金、作品进度，还是确定感？"],
     "proposed_panel_changes":["项目「内容资产」> 任务「写熊猫团团下一集大纲」","项目「现金流补位」> 任务「列 3 个可接外包方向」","项目「求职安全垫」> 任务「更新简历核心经历」"],
+    "goal_usage_mode":"background",
+    "goal_usage_reason":"用户是在梳理全局，不是在询问优先级；阶段目标不能覆盖他对收入和安全感的表达。",
+    "branch_weight_proposals":[
+      {"name":"内容资产","current_weight":null,"suggested_weight":0.8,"reason":"长期沉淀强，但短期现金回报慢","confidence":0.6,"requires_confirmation":true},
+      {"name":"现金流补位","current_weight":null,"suggested_weight":0.9,"reason":"用户明确担心收入，短期需要减压","confidence":0.7,"requires_confirmation":true},
+      {"name":"求职安全垫","current_weight":null,"suggested_weight":0.5,"reason":"提供安全感，但可能分散主线","confidence":0.5,"requires_confirmation":true}
+    ],
     "preserved_inputs":["熊猫团团","没收入的担心","接外包","找工作"],
     "merged_duplicates":[],
     "deferred_or_unsure":["暂不决定三条线权重，等用户确认当前最缺的资源"]
@@ -397,6 +422,9 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 输入: 「把所有东西都清空」
 输出: {"intent":"action","reply":"已清空。（可撤销）","actions":[{"type":"clear_all"}]}
 
+输入: 「就按你刚才的建议，把内容资产调到80%，现金流补位调到90%」，树中有 [project] 内容资产 (id:p-201)、[project] 现金流补位 (id:p-202)
+输出: {"intent":"action","reply":"已按确认调整两个分支权重。","actions":[{"type":"set_weight","id":"p-201","name":"内容资产","weight":0.8},{"type":"set_weight","id":"p-202","name":"现金流补位","weight":0.9}]}
+
 输入（目标=「Q2 月入 15k 自由职业 + 重启 B 站频道」）：「我该做什么？」，树中有「接咨询单 t-101」「剪辑第3集 t-102」「整理简历 t-103」
 输出: {
   "intent":"query",
@@ -406,6 +434,9 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "tradeoff_analysis":"接咨询单同时产生现金和信号；剪辑是长期资产但变现慢；整理简历背离自由职业目标",
     "traps_avoided":["整理简历是路径依赖","只看剪辑会陷入'忙但没收入'的行动幻觉"],
     "leverage_insight":"咨询单的反哺素材可以作为 B 站内容",
+    "goal_usage_mode":"priority_filter",
+    "goal_usage_reason":"用户询问现在该做什么，阶段目标应用来排序和取舍。",
+    "branch_weight_proposals":[],
     "next_concrete_step":"打开接单平台，筛选 3 个匹配的咨询需求",
     "success_criterion":"今天至少对 1 个咨询需求发出响应",
     "risk_if_skipped":"收入真空期延长，本月现金流目标落空",
@@ -496,6 +527,13 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "assumptions":["用户希望把这段描述直接落到面板，而不是只讨论"],
     "open_questions":["副业外包的客户类型或交付物是什么？"],
     "proposed_panel_changes":["已落地：B站频道 > 熊猫团团 > 写脚本/画分镜/配音","已落地：求职 > 更新简历/刷算法题","已落地：副业接外包"],
+    "goal_usage_mode":"background",
+    "goal_usage_reason":"本轮任务是把用户材料完整转成面板结构，而不是替用户做优先级取舍。",
+    "branch_weight_proposals":[
+      {"name":"B站频道","current_weight":null,"suggested_weight":0.8,"reason":"长期内容资产，需稳定推进","confidence":0.6,"requires_confirmation":true},
+      {"name":"求职","current_weight":null,"suggested_weight":0.6,"reason":"安全垫价值高，但不一定是当前主线","confidence":0.5,"requires_confirmation":true},
+      {"name":"副业接外包","current_weight":null,"suggested_weight":0.7,"reason":"可能补现金流，但缺交付细节","confidence":0.5,"requires_confirmation":true}
+    ],
     "preserved_inputs":["B站频道","熊猫团团系列","写脚本","画分镜","配音","找工作","更新简历","刷算法题","副业接外包"],
     "merged_duplicates":[],
     "deferred_or_unsure":["副业接外包暂未拆成具体任务，因为还缺客户、报价或交付物信息"],
@@ -531,7 +569,7 @@ function formatGoalBlock(userGoal) {
     lines.push(`暂时排除：${userGoal.exclude.join('；')}`)
 
   return `
-## 用户当前阶段目标（核心上下文，所有推荐都要围绕它）
+## 用户当前阶段目标（用于推荐/排序，不得改写用户意图）
 ${lines.join('\n')}
 `
 }
@@ -834,7 +872,7 @@ function validateOutput(data, nodeIdSet) {
       continue
     }
 
-    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'delete', 'rename', 'annotate'].includes(a.type)
+    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'delete', 'rename', 'annotate', 'set_weight'].includes(a.type)
     const needsName   = ['add_task', 'add_category', 'add_project', 'rename'].includes(a.type)
     const needsParent = ['add_task', 'add_category'].includes(a.type)
 
@@ -870,6 +908,12 @@ function validateOutput(data, nodeIdSet) {
     // annotate action 必须有 annotations
     if (a.type === 'annotate' && !a.annotations) {
       errors.push(`${prefix}(annotate) 缺少 annotations 字段`)
+    }
+
+    if (a.type === 'set_weight') {
+      if (typeof a.weight !== 'number' || a.weight < 0 || a.weight > 2) {
+        errors.push(`${prefix}(set_weight) weight 必须是 0-2 数字`)
+      }
     }
   }
 

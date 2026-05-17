@@ -662,6 +662,9 @@ async function executeAction(action, treeActions) {
       case 'clear_all':
         await treeActions.clearAll()
         return { log: '已清空所有项目（可点撤销恢复）' }
+      case 'set_weight':
+        await treeActions.updateWeight(id, action.weight)
+        return { log: `已将「${action.name || id}」权重调整为 ${Math.round(action.weight * 100)}%` }
       case 'annotate':
         await treeActions.annotateNode(id, action.annotations)
         return { log: `已为「${action.name || id}」更新策略标签` }

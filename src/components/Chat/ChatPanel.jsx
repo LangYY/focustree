@@ -103,13 +103,15 @@ function ThinkingCard({ thinking }) {
   if (!thinking || typeof thinking !== 'object') return null
   const {
     brief_rationale, situation_map, assumptions, open_questions, proposed_panel_changes,
+    goal_usage_mode, goal_usage_reason, branch_weight_proposals,
     preserved_inputs, merged_duplicates, deferred_or_unsure,
     user_goal, tradeoff_analysis, traps_avoided, leverage_insight,
     next_concrete_step, success_criterion, risk_if_skipped,
   } = thinking
   const hasStructuring = brief_rationale || situation_map?.length ||
                          assumptions?.length || open_questions?.length ||
-                         proposed_panel_changes?.length || preserved_inputs?.length ||
+                         proposed_panel_changes?.length || branch_weight_proposals?.length ||
+                         goal_usage_mode || goal_usage_reason || preserved_inputs?.length ||
                          merged_duplicates?.length || deferred_or_unsure?.length
   const hasContent = hasStructuring || user_goal || tradeoff_analysis || traps_avoided?.length ||
                      leverage_insight || next_concrete_step || success_criterion || risk_if_skipped
@@ -133,6 +135,21 @@ function ThinkingCard({ thinking }) {
           )}
           {Array.isArray(proposed_panel_changes) && proposed_panel_changes.length > 0 && (
             <ListRow label="面板建议" items={proposed_panel_changes} valueColor="text-blue-300" />
+          )}
+          {(goal_usage_mode || goal_usage_reason) && (
+            <Row
+              label="目标使用"
+              value={`${goalUsageLabel(goal_usage_mode)}${goal_usage_reason ? `：${goal_usage_reason}` : ''}`}
+              valueColor="text-gray-300"
+              multi
+            />
+          )}
+          {Array.isArray(branch_weight_proposals) && branch_weight_proposals.length > 0 && (
+            <ListRow
+              label="权重建议"
+              items={branch_weight_proposals.map(formatWeightProposal)}
+              valueColor="text-violet-300"
+            />
           )}
           {Array.isArray(assumptions) && assumptions.length > 0 && (
             <ListRow label="假设" items={assumptions} valueColor="text-gray-400" />
@@ -181,6 +198,26 @@ function ThinkingCard({ thinking }) {
       )}
     </div>
   )
+}
+
+function goalUsageLabel(mode) {
+  if (mode === 'priority_filter') return '用于排序'
+  if (mode === 'ignored') return '本轮不使用'
+  if (mode === 'background') return '仅作背景'
+  return mode || '未标注'
+}
+
+function formatWeightProposal(item) {
+  if (!item || typeof item !== 'object') return String(item)
+  const name = item.name || '未命名分支'
+  const suggested = typeof item.suggested_weight === 'number'
+    ? `${Math.round(item.suggested_weight * 100)}%`
+    : '待定'
+  const current = typeof item.current_weight === 'number'
+    ? `当前 ${Math.round(item.current_weight * 100)}%，`
+    : ''
+  const suffix = item.requires_confirmation === false ? '' : '，需确认'
+  return `${name}：${current}建议 ${suggested}${item.reason ? `，${item.reason}` : ''}${suffix}`
 }
 
 function ListRow({ label, items, valueColor = 'text-gray-300' }) {
