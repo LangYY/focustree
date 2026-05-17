@@ -6,6 +6,10 @@
  */
 
 import { postChatCompletion } from './llmClient.js'
+import {
+  containsDeprecatedPlanningPolicy,
+  redactDeprecatedPlanningPolicy,
+} from './promptSafety.js'
 
 const SUMMARY_SYSTEM_PROMPT = `你是「专注树」会话摘要器。任务：把用户和 AI 的一段对话压缩成结构化记忆。
 你的输出必须是合法 JSON，不得包含任何额外文字或 markdown。
@@ -21,6 +25,7 @@ const SUMMARY_SYSTEM_PROMPT = `你是「专注树」会话摘要器。任务：�
 - summary 用第三人称（"用户..."），简洁有力
 - 不要写"用户问了什么、AI 答了什么"这种废话流水账
 - 提炼**沉淀价值**：决策、转折、明确放弃、明确选择
+- 只总结用户真实决定，不沉淀旧 assistant 的面板压缩口径
 - topics 用名词短语，例：「B站频道」「现金流规划」「项目优先级」
 
 ## 示例
@@ -36,7 +41,11 @@ assistant: 收到
 export async function summarizeSession({ messages, apiKey, provider = 'deepseek' }) {
   if (!messages?.length) return null
   // 把对话拼成纯文本
-  const text = messages
+  const cleanMessages = messages
+    .filter(m => !(m.role === 'assistant' && containsDeprecatedPlanningPolicy(m.content)))
+    .map(m => ({ ...m, content: redactDeprecatedPlanningPolicy(m.content) }))
+
+  const text = cleanMessages
     .map(m => `${m.role}: ${m.content}`)
     .join('\n')
     .slice(0, 4000)   // 安全截断
@@ -57,10 +66,19 @@ export async function summarizeSession({ messages, apiKey, provider = 'deepseek'
   try {
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
     const parsed = JSON.parse(cleaned)
+    const summary = redactDeprecatedPlanningPolicy(parsed.summary || '').trim()
     return {
-      summary:       parsed.summary || '',
-      key_decisions: Array.isArray(parsed.key_decisions) ? parsed.key_decisions : [],
-      topics:        Array.isArray(parsed.topics) ? parsed.topics : [],
+      summary,
+      key_decisions: Array.isArray(parsed.key_decisions)
+        ? parsed.key_decisions
+            .filter(item => !containsDeprecatedPlanningPolicy(item))
+            .map(item => redactDeprecatedPlanningPolicy(item))
+        : [],
+      topics: Array.isArray(parsed.topics)
+        ? parsed.topics
+            .filter(item => !containsDeprecatedPlanningPolicy(item))
+            .map(item => redactDeprecatedPlanningPolicy(item))
+        : [],
     }
   } catch (e) {
     console.warn('[summarizer] JSON parse failed:', e.message, raw.slice(0, 200))

@@ -10,6 +10,11 @@
  */
 
 import { postChatCompletion } from './llmClient.js'
+import {
+  containsDeprecatedPlanningPolicy,
+  containsDeprecatedPlanningPolicyDeep,
+  redactDeprecatedPlanningPolicy,
+} from './promptSafety.js'
 
 const MAX_RETRIES = 3
 const VALID_TYPES = [
@@ -212,6 +217,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
 2. 对话历史里可能残留过去的状态描述（如"树已清空"、"现在没有项目"等），**全部视为过时信息**，不得引用、不得续写。
 3. 不要描述"树已清空 / 已清除 / 重新开始"等过去操作——除非本轮用户当下又要求清空。
 4. 不要在 reply 开头总结上次操作的结果。专注回答用户当下的问题。
+5. 旧 assistant 回复中的项目压缩口径不是产品规则；当前规则以本 system prompt 和当前项目树为准。
 ${timeBlock}${goalBlock}${summariesBlock}${learnedBlock}${hitRateBlock}
 ## 当前项目树（括号内是节点 ID，操作时必须使用这些 ID）
 ${trimmedTree}
@@ -442,7 +448,7 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "branch_weight_proposals":[
       {"name":"内容资产","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_reason":"长期资产主线，和内容积累目标贴近","bottom_up_reason":"短期回报慢，不能吃掉全部精力","confidence":0.6,"requires_confirmation":true},
       {"name":"现金流补位","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_reason":"现金流是当前约束，不解决会影响主线稳定","bottom_up_reason":"用户明确担心收入，短期减压优先级高","confidence":0.7,"requires_confirmation":true},
-      {"name":"求职安全垫","node_id":null,"parent_name":"root","suggested_share":0.2,"top_down_reason":"提供安全感，但不是当前主线","bottom_up_reason":"需要保留一个低频下一步，避免完全失控","confidence":0.5,"requires_confirmation":true}
+      {"name":"求职安全垫","node_id":null,"parent_name":"root","suggested_share":0.2,"top_down_reason":"提供安全感，但不是当前主线","bottom_up_reason":"低频推进可提供安全感，避免完全失控","confidence":0.5,"requires_confirmation":true}
     ],
     "preserved_inputs":["熊猫团团","没收入的担心","接外包","找工作"],
     "merged_duplicates":[],
@@ -612,10 +618,13 @@ ${lines.join('\n')}
 
 function formatSummariesBlock(summaries) {
   if (!summaries?.length) return ''
-  const lines = summaries.slice(0, 5).map(s => {
+  const lines = summaries.slice(0, 5).flatMap(s => {
+    if (containsDeprecatedPlanningPolicyDeep(s)) return []
     const date = s.ended_at ? new Date(s.ended_at).toISOString().slice(0, 10) : '—'
-    return `- [${date}] ${s.summary}`
+    const summary = redactDeprecatedPlanningPolicy(s.summary).trim()
+    return summary ? [`- [${date}] ${summary}`] : []
   })
+  if (!lines.length) return ''
   return `
 ## 近期会话回顾（最多 5 条，最新优先；用于理解用户最近在做什么，不要重复其内容）
 ${lines.join('\n')}
@@ -674,6 +683,7 @@ function formatLearnedBlock(patterns) {
   // 只注入 confidence >= 0.5 的，避免低质量噪声
   const filtered = patterns
     .filter(p => p && p.observation && (p.confidence ?? 1) >= 0.5)
+    .filter(p => !containsDeprecatedPlanningPolicy(p.observation))
     .slice(-15)
   if (!filtered.length) return ''
   const lines = filtered.map(p => {
@@ -723,19 +733,19 @@ function sanitizeHistory(history) {
     if (!m || typeof m.content !== 'string') continue
 
     if (m.role === 'assistant') {
-      if (containsStaleState(m.content)) {
+      if (containsStaleState(m.content) || containsDeprecatedPlanningPolicy(m.content)) {
         // 删除这条 assistant + 前一条 user（孤立 user 会误导模型）
         if (cleaned.length && cleaned[cleaned.length - 1].role === 'user') cleaned.pop()
         continue
       }
-      const stripped = stripDecorations(m.content)
+      const stripped = redactDeprecatedPlanningPolicy(stripDecorations(m.content))
       if (!stripped) {
         if (cleaned.length && cleaned[cleaned.length - 1].role === 'user') cleaned.pop()
         continue
       }
       cleaned.push({ role: 'assistant', content: stripped })
     } else {
-      cleaned.push({ role: m.role, content: m.content })
+      cleaned.push({ role: m.role, content: redactDeprecatedPlanningPolicy(m.content) })
     }
   }
   return cleaned.slice(-10)
@@ -864,6 +874,14 @@ function validateOutput(data, nodeIdSet) {
 
   if (!data.reply || typeof data.reply !== 'string' || data.reply.trim() === '') {
     errors.push('reply 必须是非空字符串')
+  }
+
+  if (containsDeprecatedPlanningPolicyDeep({
+    reply: data.reply,
+    thinking: data.thinking,
+    actions: data.actions,
+  })) {
+    errors.push('回复包含已废弃的项目压缩口径；必须完整保留用户明确提到的主线和具体事项')
   }
 
   // thinking 是可选的，但如果存在必须是 object
