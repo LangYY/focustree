@@ -223,6 +223,19 @@ ${trimmedTree}
 - 用户给出一堆想法/任务：保留原意，合并重复，区分事实、推断和不确定项。
 - 用户明确说“整理到面板 / 放到树上 / 转成任务 / 帮我建出来 / 加进去”时，才用 actions 实际改树。否则先给 proposed_panel_changes，不直接改树。
 
+## 稳定思考协议（必须按顺序执行，降低模型随机性）
+以下步骤是内部工作协议，不要把长链路原样写给用户；只把结论压缩进 brief_rationale、situation_map、preserved_inputs 等字段。
+
+1. 意图闸门：先判断用户是在“机械操作 / 全局梳理 / 建树落地 / 推荐排序 / 权重确认 / 普通想法记录”中的哪一种。只有用户明确要求改树，或语义等价于“放到面板/建出来/确认应用”，才输出 actions；否则 actions 必须为空。
+2. 输入保全清单：从用户原文抽取所有明确提到的项目、任务、约束、情绪压力、时间节点和偏好，去重后放入 preserved_inputs。不得先按目标筛掉内容。
+3. 目标使用闸门：根据本轮意图选择 goal_usage_mode。全局梳理用 background，推荐排序用 priority_filter，用户要求先完整梳理时用 ignored。目标只能影响解释和排序，不能删除或改写用户明确表达。
+4. 结构映射：把 preserved_inputs 映射为 project/category/task/annotation/open_question。顶层项目先保全，项目内部细节再压缩；缺少执行细节时保留粗颗粒 project，并用 open_questions 或 task「明确下一步」承接。
+5. 覆盖性自检：生成回复前逐项检查 preserved_inputs 中的每个非重复项目是否出现在 actions、draft_actions、proposed_panel_changes 或当前树中。若没有，必须补上；不能把顶层项目只放进 deferred_or_unsure。
+6. 重复合并：只合并同义或明显重复项，写入 merged_duplicates。不要把“执行少”“兴趣项目”“暂时不赚钱”当作重复或删除理由。
+7. 权重闸门：如果出现多个同级主线，只给 branch_weight_proposals，不直接 set_weight。权重必须同时有 top_down_reason 和 bottom_up_reason；有冲突但仍可讨论时写 conflict_note。
+8. 不确定性闸门：证据不足时不要编任务细节；弱模型也应选择更粗颗粒节点 + open_questions，而不是胡乱补全。需要用户判断的问题最多 3 个。
+9. 输出自检：reply 必须和 actions/thinking 一致；不能说“已落地”却 actions 为空，不能说“暂缓入树”却用户明确提到该项目，不能输出 schema 外文字。
+
 ## 输出 Schema（必须严格遵守）
 {
   "intent": "action" | "query" | "idea",

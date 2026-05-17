@@ -223,6 +223,22 @@ Agent 输出必须是 JSON，核心字段：
 
 这个流程保证 AI 可以做语言推理，但不能绕过结构化边界直接写库。
 
+### 4.2.1 稳定思考协议
+
+为减少模型输出随机性，Agent prompt 里不只写“应该怎么回答”，还要求模型按固定顺序完成内部判断：
+
+1. 先判定本轮意图：机械操作、全局梳理、建树落地、推荐排序、权重确认或普通想法。
+2. 从用户原文抽取输入保全清单，放入 `preserved_inputs`，不得先按目标筛掉内容。
+3. 决定阶段目标使用方式：`background`、`priority_filter` 或 `ignored`。
+4. 将保全清单映射为 `project/category/task/annotation/open_question`。
+5. 做覆盖性自检：用户明确提到的非重复顶层项目，必须出现在当前树、`actions`、`draft_actions` 或 `proposed_panel_changes` 中。
+6. 只合并同义或明显重复项，写入 `merged_duplicates`。
+7. 多主线时只给权重草案，不直接写入权重。
+8. 不确定时使用粗颗粒节点和 `open_questions`，不编造细节。
+9. 最后检查 `reply`、`thinking`、`actions` 是否一致。
+
+这套协议的目标是把“强模型自由发挥”改成“不同模型都先填同一套判断表”，从而降低模型能力差异带来的产品行为波动。
+
 ### 4.3 模型路由算法
 
 入口：[`server/agent.js`](./server/agent.js)
