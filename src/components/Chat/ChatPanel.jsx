@@ -103,14 +103,14 @@ function ThinkingCard({ thinking }) {
   if (!thinking || typeof thinking !== 'object') return null
   const {
     brief_rationale, situation_map, assumptions, open_questions, proposed_panel_changes,
-    goal_usage_mode, goal_usage_reason, branch_weight_proposals,
+    goal_usage_mode, goal_usage_reason,
     preserved_inputs, merged_duplicates, deferred_or_unsure,
     user_goal, tradeoff_analysis, traps_avoided, leverage_insight,
     next_concrete_step, success_criterion, risk_if_skipped,
   } = thinking
   const hasStructuring = brief_rationale || situation_map?.length ||
                          assumptions?.length || open_questions?.length ||
-                         proposed_panel_changes?.length || branch_weight_proposals?.length ||
+                         proposed_panel_changes?.length ||
                          goal_usage_mode || goal_usage_reason || preserved_inputs?.length ||
                          merged_duplicates?.length || deferred_or_unsure?.length
   const hasContent = hasStructuring || user_goal || tradeoff_analysis || traps_avoided?.length ||
@@ -142,13 +142,6 @@ function ThinkingCard({ thinking }) {
               value={`${goalUsageLabel(goal_usage_mode)}${goal_usage_reason ? `：${goal_usage_reason}` : ''}`}
               valueColor="text-gray-300"
               multi
-            />
-          )}
-          {Array.isArray(branch_weight_proposals) && branch_weight_proposals.length > 0 && (
-            <ListRow
-              label="权重建议"
-              items={branch_weight_proposals.map(formatWeightProposal)}
-              valueColor="text-violet-300"
             />
           )}
           {Array.isArray(assumptions) && assumptions.length > 0 && (
@@ -207,17 +200,93 @@ function goalUsageLabel(mode) {
   return mode || '未标注'
 }
 
-function formatWeightProposal(item) {
+function WeightPlanCard({ thinking, applied, onApply }) {
+  const proposals = Array.isArray(thinking?.branch_weight_proposals)
+    ? thinking.branch_weight_proposals.map(normalizeWeightProposal).filter(p => p.share != null)
+    : []
+  if (!proposals.length) return null
+
+  const total = proposals.reduce((sum, p) => sum + p.share, 0)
+  const totalPct = Math.round(total * 100)
+  const needsNormalization = total > 0 && Math.abs(total - 1) > 0.01
+  const conflicts = Array.isArray(thinking?.conflicts) ? thinking.conflicts.filter(Boolean) : []
+  const blocked = conflicts.length > 0 || thinking?.weight_strategy?.requires_clarification
+  const strategy = thinking?.weight_strategy || {}
+  const scopeLabel = strategy.scope === 'nested' ? '子分支精力配比' : '顶层精力配比'
+
+  return (
+    <div className="mt-2 border-t border-gray-700/70 pt-2 text-[11px] leading-relaxed">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div>
+          <span className="text-violet-300 font-medium">权重方案</span>
+          <span className="text-gray-500 ml-1">
+            {scopeLabel}：{totalPct}%
+          </span>
+        </div>
+        <button
+          onClick={onApply}
+          disabled={applied || blocked || !onApply}
+          className="text-[11px] px-2 py-1 rounded-md bg-violet-700/80 hover:bg-violet-600 text-white disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
+        >
+          {applied ? '已应用' : blocked ? '需确认' : '应用权重方案'}
+        </button>
+      </div>
+
+      {needsNormalization && (
+        <div className="mb-1.5 text-amber-300">
+          这是相对权重，应用时会归一化为 100%。
+        </div>
+      )}
+      {strategy.conflict_note && (
+        <div className="mb-1.5 text-amber-300">{strategy.conflict_note}</div>
+      )}
+      {conflicts.length > 0 && (
+        <ul className="mb-1.5 space-y-0.5">
+          {conflicts.map((item, index) => (
+            <li key={index} className="text-amber-300">· {item}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="space-y-1.5">
+        {proposals.map((proposal, index) => (
+          <div key={`${proposal.name}-${index}`} className="pl-2 border-l border-violet-800/60">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-gray-200">{proposal.name}</span>
+              <span className="text-violet-300 font-medium">{Math.round(proposal.share * 100)}%</span>
+            </div>
+            {proposal.topDownReason && (
+              <div className="text-gray-500 mt-0.5">自上而下 · <span className="text-gray-300">{proposal.topDownReason}</span></div>
+            )}
+            {proposal.bottomUpReason && (
+              <div className="text-gray-500 mt-0.5">自下而上 · <span className="text-gray-300">{proposal.bottomUpReason}</span></div>
+            )}
+            {typeof proposal.confidence === 'number' && (
+              <div className="text-gray-600 mt-0.5">置信 {Math.round(proposal.confidence * 100)}%</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function normalizeWeightProposal(item) {
   if (!item || typeof item !== 'object') return String(item)
-  const name = item.name || '未命名分支'
-  const suggested = typeof item.suggested_weight === 'number'
-    ? `${Math.round(item.suggested_weight * 100)}%`
-    : '待定'
-  const current = typeof item.current_weight === 'number'
-    ? `当前 ${Math.round(item.current_weight * 100)}%，`
-    : ''
-  const suffix = item.requires_confirmation === false ? '' : '，需确认'
-  return `${name}：${current}建议 ${suggested}${item.reason ? `，${item.reason}` : ''}${suffix}`
+  const rawShare = item.suggested_share ?? item.suggested_weight ?? item.weight ?? item.share
+  const numericShare = typeof rawShare === 'string'
+    ? Number(rawShare.replace('%', '').trim())
+    : rawShare
+  const share = Number.isFinite(numericShare)
+    ? (numericShare > 2 ? numericShare / 100 : numericShare)
+    : null
+  return {
+    name: item.name || item.branch_name || '未命名分支',
+    share,
+    topDownReason: item.top_down_reason || item.reason || '',
+    bottomUpReason: item.bottom_up_reason || '',
+    confidence: typeof item.confidence === 'number' ? item.confidence : null,
+  }
 }
 
 function ListRow({ label, items, valueColor = 'text-gray-300' }) {
@@ -294,7 +363,7 @@ export default function ChatPanel({
   treeData, onHoverNode,
   onTriggerReview, reviewGenerating,
   onRetry,
-  onCancel, pendingCount,
+  onCancel, onApplyWeightPlan, pendingCount,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -502,6 +571,13 @@ export default function ChatPanel({
                   nameToId={nameToId}
                   onHoverNode={onHoverNode}
                 />
+                {msg.role === 'assistant' && msg.thinking && (
+                  <WeightPlanCard
+                    thinking={msg.thinking}
+                    applied={!!msg.applied_weight_plan}
+                    onApply={onApplyWeightPlan ? () => onApplyWeightPlan(msg.id) : null}
+                  />
+                )}
                 {msg.role === 'assistant' && msg.thinking && (
                   <ThinkingCard thinking={msg.thinking} />
                 )}

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { treeToPromptText, flattenTree } from '../lib/treeUtils'
+import { treeToPromptText, flattenTree, findNodeById } from '../lib/treeUtils'
 import { getClientTime } from '../lib/clientTime'
 import { classifyIntent } from '../lib/intentClassifier'
 
@@ -484,6 +484,106 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading])
 
   /**
+   * 应用 AI 在草案卡片里提出的整套权重方案。
+   * 权重语义是同级精力配比：应用前按父级分组归一化到 100%。
+   */
+  const applyWeightPlan = useCallback(async (messageId, treeData) => {
+    if (!treeActions?.updateWeight || !messageId) return
+    const msg = messages.find(m => m.id === messageId)
+    const thinking = msg?.thinking
+    const proposals = Array.isArray(thinking?.branch_weight_proposals)
+      ? thinking.branch_weight_proposals
+      : []
+    if (!msg || msg.applied_weight_plan || proposals.length === 0) return
+
+    const conflicts = Array.isArray(thinking.conflicts) ? thinking.conflicts.filter(Boolean) : []
+    if (conflicts.length || thinking.weight_strategy?.requires_clarification) {
+      const content = '这套权重方案还有未确认的冲突，先确认排序原则后再应用。'
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
+      return
+    }
+
+    const allNodes = treeData ? flattenTree(treeData).filter(n => n.type !== 'root') : []
+    const byName = new Map()
+    for (const node of allNodes) {
+      if (node.name && !byName.has(node.name)) byName.set(node.name, node)
+    }
+
+    const newIdByName = {}
+    const resolveProposals = () => proposals.map(proposal => {
+      const name = proposal.name || proposal.branch_name
+      const explicitId = proposal.node_id || proposal.id || proposal.nodeId
+      const node =
+        (explicitId && findNodeById(treeData, explicitId)) ||
+        (name && newIdByName[name] ? { id: newIdByName[name], name } : null) ||
+        (name ? byName.get(name) : null)
+      const share = readSuggestedShare(proposal)
+      const group = proposal.parent_id || proposal.parent_name || thinking.weight_strategy?.normalization_parent || 'root'
+      return { proposal, node, name, share, group }
+    })
+
+    let resolved = resolveProposals()
+    let missingTargets = resolved.filter(item => !item.node?.id)
+    let invalidShares = resolved.filter(item => typeof item.share !== 'number')
+
+    if (missingTargets.length && Array.isArray(thinking.draft_actions) && thinking.draft_actions.length) {
+      const allowedDraftTypes = new Set(['add_project', 'add_category', 'add_task', 'annotate'])
+      for (const action of thinking.draft_actions) {
+        if (!allowedDraftTypes.has(action?.type)) continue
+        const nextAction = normalizeDraftAction(action)
+        if (nextAction.parent && newIdByName[nextAction.parent]) {
+          nextAction.parent = newIdByName[nextAction.parent]
+        }
+        const result = await executeAction(nextAction, treeActions)
+        if (result?.newId && nextAction.name) newIdByName[nextAction.name] = result.newId
+      }
+      resolved = resolveProposals()
+      missingTargets = resolved.filter(item => !item.node?.id)
+      invalidShares = resolved.filter(item => typeof item.share !== 'number')
+    }
+
+    if (missingTargets.length) {
+      const names = missingTargets.map(item => item.name || '未命名分支').join('、')
+      const content = `这套权重方案里有分支还没法对应到面板节点：${names}。请先应用结构草案或让我重新生成。`
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
+      return
+    }
+    if (invalidShares.length) {
+      const names = invalidShares.map(item => item.name || '未命名分支').join('、')
+      const content = `这套权重方案里有分支缺少有效百分比：${names}。请让我重新生成一版权重草案。`
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
+      return
+    }
+
+    const groups = new Map()
+    for (const item of resolved) {
+      if (!groups.has(item.group)) groups.set(item.group, [])
+      groups.get(item.group).push(item)
+    }
+
+    for (const items of groups.values()) {
+      const total = items.reduce((sum, item) => sum + item.share, 0)
+      if (total <= 0) continue
+      for (const item of items) {
+        const normalizedWeight = item.share / total
+        await treeActions.updateWeight(item.node.id, normalizedWeight)
+      }
+    }
+
+    const content = '已应用这套权重方案。'
+    setMessages(prev => [
+      ...prev.map(m => m.id === messageId ? { ...m, applied_weight_plan: true } : m),
+      { id: uuid(), role: 'assistant', content, kind: 'local' },
+    ])
+    if (user && sessionId) {
+      supabase.from('conversations').insert({
+        user_id: user.id, role: 'assistant', content,
+        session_id: sessionId,
+      })
+    }
+  }, [messages, treeActions, user, sessionId])
+
+  /**
    * 清空当前 session 的对话（DB 中保留旧 session 历史，可在历史面板查阅）
    * 同时开一个新 session
    */
@@ -590,6 +690,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     recommendations, hitRate, reloadRecommendations: loadRecommendations,
     // 周末回顾
     injectReviewMessage,
+    applyWeightPlan,
   }
 }
 
@@ -675,5 +776,24 @@ async function executeAction(action, treeActions) {
   } catch (err) {
     console.error('[executeAction] failed:', action, err)
     return { log: `操作失败：${action.name || id}` }
+  }
+}
+
+function readSuggestedShare(proposal) {
+  const raw =
+    proposal?.suggested_share ??
+    proposal?.suggested_weight ??
+    proposal?.weight ??
+    proposal?.share
+  const value = typeof raw === 'string' ? Number(raw.replace('%', '').trim()) : raw
+  if (!Number.isFinite(value) || value < 0) return null
+  return value > 2 ? value / 100 : value
+}
+
+function normalizeDraftAction(action) {
+  return {
+    ...action,
+    id: action.id || action.node_id || action.nodeId || action.task_id || action.taskId,
+    parent: action.parent || action.parent_id || action.parentId,
   }
 }

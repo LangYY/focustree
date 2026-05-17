@@ -118,7 +118,7 @@ export default function App() {
     addNode, renameNode, updateStatus,
     deleteNode: guardedDeleteNode,
     clearAll: guardedClearAll,
-    annotateNode, expandAll, collapseAll,
+    annotateNode, updateWeight, expandAll, collapseAll,
   }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
@@ -128,6 +128,7 @@ export default function App() {
     recommendations, hitRate, reloadRecommendations,
     recentSummaries,
     injectReviewMessage,
+    applyWeightPlan,
   } = useChat(user, treeActions, goal, model)
 
   // 今日聚焦
@@ -302,6 +303,7 @@ export default function App() {
           reviewGenerating={weeklyReview.generating}
           onRetry={() => retryLastMessage(treeData)}
           onCancel={cancelRequest}
+          onApplyWeightPlan={(messageId) => applyWeightPlan(messageId, treeData)}
           pendingCount={pendingQueue.length}
         />
       </div>
