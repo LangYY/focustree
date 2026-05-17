@@ -231,6 +231,53 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
   }
 
+  const applyConfirmablePlan = useCallback(async (sourceMsg, treeData, activeSession) => {
+    const thinking = sourceMsg?.thinking
+    if (!thinking || !treeActions) return false
+
+    const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
+    const weightResult = await applyWeightProposalsSafely(thinking, treeActions, treeData, draftResult.newIdByName)
+
+    const replyParts = []
+    if (draftResult.attempted) {
+      if (draftResult.createdCount > 0) {
+        replyParts.push(`已按上一条草案应用到面板：创建/更新 ${draftResult.createdCount} 个节点。`)
+      } else if (draftResult.skippedCount > 0) {
+        replyParts.push('上一条草案里的节点已经在面板里，我没有重复创建。')
+      }
+    }
+
+    if (weightResult.status === 'applied') {
+      replyParts.push('已应用这套权重方案。')
+    } else if (weightResult.status === 'blocked') {
+      replyParts.push('权重方案仍需先确认排序原则，我没有自动写入。')
+    } else if (weightResult.status === 'missing') {
+      replyParts.push(`权重方案里有分支还没法对应到面板节点：${weightResult.names.join('、')}。`)
+    } else if (weightResult.status === 'invalid') {
+      replyParts.push(`权重方案里有分支缺少有效百分比：${weightResult.names.join('、')}。`)
+    }
+
+    if (!replyParts.length) return false
+
+    const content = replyParts.join('\n')
+    const assistantMsg = { id: uuid(), role: 'assistant', content, kind: 'local' }
+    setMessages(prev => [
+      ...prev.map(m => m.id === sourceMsg.id ? {
+        ...m,
+        applied_draft_actions: draftResult.attempted ? true : m.applied_draft_actions,
+        applied_weight_plan: weightResult.status === 'applied' ? true : m.applied_weight_plan,
+      } : m),
+      assistantMsg,
+    ])
+    if (user) {
+      supabase.from('conversations').insert({
+        user_id: user.id, role: 'assistant', content,
+        session_id: activeSession,
+      })
+    }
+    return true
+  }, [treeActions, user])
+
   // ── 发消息 ───────────────────────────────────────────────
 
   const sendMessage = useCallback(async (content, treeData) => {
@@ -266,6 +313,42 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         user_id: user.id, role: 'user', content,
         session_id: activeSession,
       })
+    }
+
+    if (isConfirmationText(content)) {
+      try {
+        const sourceMsg = findLatestConfirmableMessage(messages)
+        if (!sourceMsg) {
+          const reply = '我没找到上一条可应用的草案。你想确认哪一项？'
+          setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content: reply, kind: 'local' }])
+          if (user) {
+            supabase.from('conversations').insert({
+              user_id: user.id, role: 'assistant', content: reply,
+              session_id: activeSession,
+            })
+          }
+          setIsLoading(false)
+          abortRef.current = null
+          return
+        }
+
+        const handled = await applyConfirmablePlan(sourceMsg, treeData, activeSession)
+        if (handled) {
+          setIsLoading(false)
+          abortRef.current = null
+          return
+        }
+      } catch (err) {
+        console.error('[useChat] confirm previous plan failed:', err)
+        setMessages(prev => [...prev, {
+          id: uuid(), role: 'assistant',
+          content: `确认操作出错：${err.message || err}`,
+          kind: 'local',
+        }])
+        setIsLoading(false)
+        abortRef.current = null
+        return
+      }
     }
 
     // ⚡ 算法层短路：明确指令（加/删/改/标记 等）直接本地执行，不打 LLM
@@ -500,7 +583,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         return prev
       })
     }
-  }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading])
+  }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading, applyConfirmablePlan])
 
   /**
    * 应用 AI 在草案卡片里提出的整套权重方案。
@@ -815,4 +898,142 @@ function normalizeDraftAction(action) {
     id: action.id || action.node_id || action.nodeId || action.task_id || action.taskId,
     parent: action.parent || action.parent_id || action.parentId,
   }
+}
+
+function isConfirmationText(text) {
+  return /^(?:确认|确认执行|应用|应用方案|按这个|按这个执行|按你说的|按你说的做|就这样|落到面板|加到面板|建出来|执行)(?:吧|。|！|!|\.)?\s*$/.test((text || '').trim())
+}
+
+function findLatestConfirmableMessage(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg?.role !== 'assistant' || !msg.thinking) continue
+    const hasDraft = Array.isArray(msg.thinking.draft_actions) &&
+      msg.thinking.draft_actions.length > 0 &&
+      !msg.applied_draft_actions
+    const hasWeights = Array.isArray(msg.thinking.branch_weight_proposals) &&
+      msg.thinking.branch_weight_proposals.length > 0 &&
+      !msg.applied_weight_plan
+    if (hasDraft || hasWeights) return msg
+  }
+  return null
+}
+
+async function executeDraftActionsSafely(actions, treeActions, treeData) {
+  const allowedDraftTypes = new Set(['add_project', 'add_category', 'add_task', 'annotate'])
+  const draftActions = Array.isArray(actions)
+    ? actions.filter(action => allowedDraftTypes.has(action?.type))
+    : []
+  const result = {
+    attempted: draftActions.length > 0,
+    createdCount: 0,
+    skippedCount: 0,
+    newIdByName: {},
+  }
+  if (!draftActions.length || !treeActions) return result
+
+  const index = createTreeIndex(treeData)
+  for (const action of draftActions) {
+    const nextAction = normalizeDraftAction(action)
+    const existing = findExistingDraftNode(nextAction, index, result.newIdByName)
+    if (existing?.id) {
+      if (nextAction.name) result.newIdByName[nextAction.name] = existing.id
+      result.skippedCount += 1
+      continue
+    }
+
+    if (nextAction.parent) {
+      nextAction.parent = resolveDraftParentId(nextAction.parent, index, result.newIdByName)
+    }
+    const actionResult = await executeAction(nextAction, treeActions)
+    if (actionResult?.newId && nextAction.name) result.newIdByName[nextAction.name] = actionResult.newId
+    result.createdCount += 1
+  }
+  return result
+}
+
+async function applyWeightProposalsSafely(thinking, treeActions, treeData, newIdByName = {}) {
+  const proposals = Array.isArray(thinking?.branch_weight_proposals)
+    ? thinking.branch_weight_proposals
+    : []
+  if (!proposals.length || !treeActions?.updateWeight) return { status: 'none' }
+
+  const conflicts = Array.isArray(thinking.conflicts) ? thinking.conflicts.filter(Boolean) : []
+  if (conflicts.length || thinking.weight_strategy?.requires_clarification) {
+    return { status: 'blocked' }
+  }
+
+  const index = createTreeIndex(treeData)
+  const resolved = proposals.map(proposal => {
+    const name = proposal.name || proposal.branch_name
+    const explicitId = proposal.node_id || proposal.id || proposal.nodeId
+    const node =
+      (explicitId && findNodeById(treeData, explicitId)) ||
+      (name && newIdByName[name] ? { id: newIdByName[name], name } : null) ||
+      (name ? index.byName.get(name) : null)
+    const share = readSuggestedShare(proposal)
+    const group = proposal.parent_id || proposal.parent_name || thinking.weight_strategy?.normalization_parent || 'root'
+    return { node, name, share, group }
+  })
+
+  const missingTargets = resolved.filter(item => !item.node?.id)
+  if (missingTargets.length) {
+    return { status: 'missing', names: missingTargets.map(item => item.name || '未命名分支') }
+  }
+  const invalidShares = resolved.filter(item => typeof item.share !== 'number')
+  if (invalidShares.length) {
+    return { status: 'invalid', names: invalidShares.map(item => item.name || '未命名分支') }
+  }
+
+  const groups = new Map()
+  for (const item of resolved) {
+    if (!groups.has(item.group)) groups.set(item.group, [])
+    groups.get(item.group).push(item)
+  }
+
+  for (const items of groups.values()) {
+    const total = items.reduce((sum, item) => sum + item.share, 0)
+    if (total <= 0) continue
+    for (const item of items) {
+      await treeActions.updateWeight(item.node.id, item.share / total)
+    }
+  }
+  return { status: 'applied' }
+}
+
+function createTreeIndex(treeData) {
+  const nodes = treeData ? flattenTree(treeData).filter(n => n.type !== 'root') : []
+  const byId = new Map()
+  const byName = new Map()
+  for (const node of nodes) {
+    if (node.id) byId.set(node.id, node)
+    if (node.name && !byName.has(node.name)) byName.set(node.name, node)
+  }
+  return { nodes, byId, byName }
+}
+
+function resolveDraftParentId(parent, index, newIdByName) {
+  if (!parent) return parent
+  if (newIdByName[parent]) return newIdByName[parent]
+  if (index.byId.has(parent)) return parent
+  const named = index.byName.get(parent)
+  return named?.id || parent
+}
+
+function findExistingDraftNode(action, index, newIdByName) {
+  if (!action?.name) return null
+  if (action.type === 'add_project') {
+    return index.nodes.find(node => node.type === 'project' && node.name === action.name && !node.parent_id) ||
+      index.byName.get(action.name) ||
+      null
+  }
+  if (action.type === 'add_task' || action.type === 'add_category') {
+    const type = action.type === 'add_task' ? 'task' : 'category'
+    const parentId = resolveDraftParentId(action.parent, index, newIdByName)
+    if (parentId) {
+      return index.nodes.find(node => node.type === type && node.name === action.name && node.parent_id === parentId) || null
+    }
+    return index.nodes.find(node => node.type === type && node.name === action.name) || null
+  }
+  return null
 }
