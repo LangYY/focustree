@@ -25,6 +25,11 @@ function countDescendants(node) {
   return n
 }
 
+function linkStrokeWidth(d) {
+  const siblingWeights = d?.source?.data?.children?.map(child => child.weight)
+  return getLinkStrokeWidth(d?.target?.data?.weight, siblingWeights)
+}
+
 export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
@@ -84,7 +89,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('stroke', d =>
         d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
       )
-      .attr('stroke-width', d => getLinkStrokeWidth(d.target.data.weight))
+      .attr('stroke-width', d => linkStrokeWidth(d))
       .attr('opacity', 0.45)
       .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
 
@@ -246,9 +251,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     g.selectAll('.link')
       .attr('opacity', 0.45)
       .attr('stroke-width', function () {
-        // 从 D3 数据里取 weight；没有就 1
         const d = d3.select(this).datum()
-        return getLinkStrokeWidth(d?.target?.data?.weight)
+        return linkStrokeWidth(d)
       })
 
     if (!highlightedNodeId || !rootRef.current) return
@@ -272,7 +276,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
           .attr('opacity', 0.95)
           .attr('stroke-width', function () {
             const d = d3.select(this).datum()
-            return getLinkStrokeWidth(d?.target?.data?.weight) + 1.5
+            return linkStrokeWidth(d) + 1.5
           })
       }
     })

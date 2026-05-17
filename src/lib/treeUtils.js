@@ -133,8 +133,21 @@ export function getNodeColor(node) {
   return '#d1d5db'
 }
 
-export function getLinkStrokeWidth(weight = 1) {
-  return 1 + weight * 5
+export function getLinkStrokeWidth(weight = 1, siblingWeights = null) {
+  const numeric = Number.isFinite(Number(weight)) ? Math.max(0, Number(weight)) : 1
+
+  if (Array.isArray(siblingWeights) && siblingWeights.length > 1) {
+    const cleanWeights = siblingWeights.map(w =>
+      Number.isFinite(Number(w)) ? Math.max(0, Number(w)) : 1
+    )
+    const total = cleanWeights.reduce((sum, w) => sum + w, 0)
+    const share = total > 0 ? numeric / total : 1 / siblingWeights.length
+    const clampedShare = Math.max(0.03, Math.min(0.75, share))
+    return 1.8 + Math.sqrt(clampedShare) * 8
+  }
+
+  const visualWeight = numeric === 1 ? 0.25 : Math.max(0.03, Math.min(0.75, numeric))
+  return 1.8 + Math.sqrt(visualWeight) * 8
 }
 
 /** 通过 ID 找节点 */

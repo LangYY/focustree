@@ -344,11 +344,26 @@ export function useTree(user) {
     if (!user) return
     const node = findNodeById(treeData, nodeId)
     const prevWeight = node?.weight ?? 1.0
+    const nextWeight = Number.isFinite(Number(weight)) ? Math.max(0, Math.min(2, Number(weight))) : prevWeight
 
-    await supabase.from('nodes').update({ weight }).eq('id', nodeId).eq('user_id', user.id)
+    setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, nextWeight) : prev)
+
+    const { error } = await supabase
+      .from('nodes')
+      .update({ weight: nextWeight })
+      .eq('id', nodeId)
+      .eq('user_id', user.id)
+
+    if (error) {
+      console.error('[updateWeight]', error.message)
+      alert(`调整权重失败：${error.message}`)
+      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, prevWeight) : prev)
+      return
+    }
 
     pushHistory(`调整「${node?.name}」权重`, async () => {
       await supabase.from('nodes').update({ weight: prevWeight }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, prevWeight) : prev)
     })
 
     await loadNodes()
@@ -376,6 +391,12 @@ function setAllExpanded(node, value) {
 function toggleExpanded(node, id) {
   if (node.id === id) return { ...node, expanded: !node.expanded }
   return { ...node, children: node.children?.map(c => toggleExpanded(c, id)) }
+}
+
+function updateNodeWeightInTree(node, nodeId, weight) {
+  if (node.id === nodeId) return { ...node, weight }
+  if (!node.children?.length) return node
+  return { ...node, children: node.children.map(c => updateNodeWeightInTree(c, nodeId, weight)) }
 }
 
 /**
