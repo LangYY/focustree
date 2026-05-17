@@ -235,8 +235,11 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     const thinking = sourceMsg?.thinking
     if (!thinking || !treeActions) return false
 
-    const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
-    const weightResult = await applyWeightProposalsSafely(thinking, treeActions, treeData, draftResult.newIdByName)
+    const draftActions = sourceMsg.applied_draft_actions ? [] : thinking.draft_actions
+    const draftResult = await executeDraftActionsSafely(draftActions, treeActions, treeData)
+    const weightResult = sourceMsg.applied_weight_plan
+      ? { status: 'none' }
+      : await applyWeightProposalsSafely(thinking, treeActions, treeData, draftResult.newIdByName)
 
     const replyParts = []
     if (draftResult.attempted) {
@@ -277,6 +280,29 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
     return true
   }, [treeActions, user])
+
+  const applyDraftPlan = useCallback(async (messageId, treeData) => {
+    if (!messageId || !treeActions) return
+    const sourceMsg = messages.find(m => m.id === messageId)
+    const thinking = sourceMsg?.thinking
+    if (!sourceMsg || sourceMsg.applied_draft_actions || !Array.isArray(thinking?.draft_actions) || !thinking.draft_actions.length) return
+
+    const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
+    const content = draftResult.createdCount > 0
+      ? `已按这套结构草案应用到面板：创建/更新 ${draftResult.createdCount} 个节点。`
+      : '这套结构草案里的节点已经在面板里，我没有重复创建。'
+
+    setMessages(prev => [
+      ...prev.map(m => m.id === messageId ? { ...m, applied_draft_actions: true } : m),
+      { id: uuid(), role: 'assistant', content, kind: 'local' },
+    ])
+    if (user && sessionId) {
+      supabase.from('conversations').insert({
+        user_id: user.id, role: 'assistant', content,
+        session_id: sessionId,
+      })
+    }
+  }, [messages, treeActions, user, sessionId])
 
   // ── 发消息 ───────────────────────────────────────────────
 
@@ -611,7 +637,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       if (node.name && !byName.has(node.name)) byName.set(node.name, node)
     }
 
-    const newIdByName = {}
+    let newIdByName = {}
     const resolveProposals = () => proposals.map(proposal => {
       const name = proposal.name || proposal.branch_name
       const explicitId = proposal.node_id || proposal.id || proposal.nodeId
@@ -629,16 +655,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     let invalidShares = resolved.filter(item => typeof item.share !== 'number')
 
     if (missingTargets.length && Array.isArray(thinking.draft_actions) && thinking.draft_actions.length) {
-      const allowedDraftTypes = new Set(['add_project', 'add_category', 'add_task', 'annotate'])
-      for (const action of thinking.draft_actions) {
-        if (!allowedDraftTypes.has(action?.type)) continue
-        const nextAction = normalizeDraftAction(action)
-        if (nextAction.parent && newIdByName[nextAction.parent]) {
-          nextAction.parent = newIdByName[nextAction.parent]
-        }
-        const result = await executeAction(nextAction, treeActions)
-        if (result?.newId && nextAction.name) newIdByName[nextAction.name] = result.newId
-      }
+      const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
+      newIdByName = draftResult.newIdByName
       resolved = resolveProposals()
       missingTargets = resolved.filter(item => !item.node?.id)
       invalidShares = resolved.filter(item => typeof item.share !== 'number')
@@ -793,6 +811,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     // 周末回顾
     injectReviewMessage,
     applyWeightPlan,
+    applyDraftPlan,
   }
 }
 
@@ -1022,6 +1041,7 @@ function resolveDraftParentId(parent, index, newIdByName) {
 
 function findExistingDraftNode(action, index, newIdByName) {
   if (!action?.name) return null
+  if (newIdByName[action.name]) return { id: newIdByName[action.name], name: action.name }
   if (action.type === 'add_project') {
     return index.nodes.find(node => node.type === 'project' && node.name === action.name && !node.parent_id) ||
       index.byName.get(action.name) ||

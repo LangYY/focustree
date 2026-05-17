@@ -200,6 +200,48 @@ function goalUsageLabel(mode) {
   return mode || '未标注'
 }
 
+function DraftPlanCard({ thinking, applied, onApply }) {
+  const actions = Array.isArray(thinking?.draft_actions)
+    ? thinking.draft_actions.filter(action => ['add_project', 'add_category', 'add_task', 'annotate'].includes(action?.type))
+    : []
+  if (!actions.length) return null
+
+  const summary = actions.reduce((acc, action) => {
+    acc[action.type] = (acc[action.type] || 0) + 1
+    return acc
+  }, {})
+  const summaryText = [
+    summary.add_project ? `${summary.add_project} 个项目` : null,
+    summary.add_category ? `${summary.add_category} 个分类` : null,
+    summary.add_task ? `${summary.add_task} 个任务` : null,
+    summary.annotate ? `${summary.annotate} 个标注` : null,
+  ].filter(Boolean).join('、')
+  const preview = actions.slice(0, 5).map(action => action.name || action.id || '未命名节点')
+
+  return (
+    <div className="mt-2 border-t border-gray-700/70 pt-2 text-[11px] leading-relaxed">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div>
+          <span className="text-blue-300 font-medium">结构草案</span>
+          <span className="text-gray-500 ml-1">{summaryText || `${actions.length} 项`}</span>
+        </div>
+        <button
+          onClick={onApply}
+          disabled={applied || !onApply}
+          className="text-[11px] px-2 py-1 rounded-md bg-blue-700/80 hover:bg-blue-600 text-white disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
+        >
+          {applied ? '已应用' : '应用到面板'}
+        </button>
+      </div>
+      {preview.length > 0 && (
+        <div className="text-gray-500">
+          {preview.join('、')}{actions.length > preview.length ? ` 等 ${actions.length} 项` : ''}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function WeightPlanCard({ thinking, applied, onApply }) {
   const proposals = Array.isArray(thinking?.branch_weight_proposals)
     ? thinking.branch_weight_proposals.map(normalizeWeightProposal).filter(p => p.share != null)
@@ -363,7 +405,7 @@ export default function ChatPanel({
   treeData, onHoverNode,
   onTriggerReview, reviewGenerating,
   onRetry,
-  onCancel, onApplyWeightPlan, pendingCount,
+  onCancel, onApplyDraftPlan, onApplyWeightPlan, pendingCount,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -571,6 +613,13 @@ export default function ChatPanel({
                   nameToId={nameToId}
                   onHoverNode={onHoverNode}
                 />
+                {msg.role === 'assistant' && msg.thinking && (
+                  <DraftPlanCard
+                    thinking={msg.thinking}
+                    applied={!!msg.applied_draft_actions}
+                    onApply={onApplyDraftPlan ? () => onApplyDraftPlan(msg.id) : null}
+                  />
+                )}
                 {msg.role === 'assistant' && msg.thinking && (
                   <WeightPlanCard
                     thinking={msg.thinking}

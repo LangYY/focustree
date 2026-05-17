@@ -129,6 +129,7 @@ export default function App() {
     recentSummaries,
     injectReviewMessage,
     applyWeightPlan,
+    applyDraftPlan,
   } = useChat(user, treeActions, goal, model)
 
   // 今日聚焦
@@ -303,6 +304,7 @@ export default function App() {
           reviewGenerating={weeklyReview.generating}
           onRetry={() => retryLastMessage(treeData)}
           onCancel={cancelRequest}
+          onApplyDraftPlan={(messageId) => applyDraftPlan(messageId, treeData)}
           onApplyWeightPlan={(messageId) => applyWeightPlan(messageId, treeData)}
           pendingCount={pendingQueue.length}
         />
