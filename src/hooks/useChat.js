@@ -486,7 +486,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         signal: controller.signal,
       })
       const responseMs = Math.round(performance.now() - agentStartedAt)
-      const { intent, reply, actions, thinking, model_used, usage, usage_cost, error, aborted } = result
+      const { intent, reply, actions, thinking, model_used, context_policy, usage, usage_cost, error, aborted } = result
 
       // 用户主动停止，静默退出
       if (aborted) return
@@ -551,6 +551,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         intent: intent || null,
         thinking: thinking || null,
         model_used: model_used || null,
+        context_policy: context_policy || null,
         response_ms: responseMs,
         usage: usage || null,
         usage_cost: usage_cost || null,

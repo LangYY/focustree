@@ -642,6 +642,7 @@ export default function ChatPanel({
                     {formatResponseTime(msg.response_ms) && ` · ${formatResponseTime(msg.response_ms)}`}
                     {formatCost(msg.usage_cost) && ` · ${formatCost(msg.usage_cost)}`}
                     {formatTokenCount(msg.usage) && ` · ${formatTokenCount(msg.usage)}`}
+                    {msg.context_policy === 'isolated' && ' · 上下文隔离'}
                   </div>
                 )}
                 {msg.role === 'assistant' && msg.kind === 'local' && (

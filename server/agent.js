@@ -50,7 +50,22 @@ export async function runAgent({
   model = 'auto', provider = 'deepseek', apiKey,
   signal = null,
 }) {
-  const systemPrompt = buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime)
+  const contextPolicy = resolveContextPolicy()
+  const effectiveContext = applyContextPolicy({
+    history,
+    recentSummaries,
+    learnedPatterns,
+    hitRate,
+  }, contextPolicy)
+  const systemPrompt = buildSystemPrompt(
+    treeText,
+    userGoal,
+    effectiveContext.recentSummaries,
+    effectiveContext.learnedPatterns,
+    effectiveContext.hitRate,
+    clientTime,
+    contextPolicy
+  )
   const modelName = resolveModel(model, message, provider)
   let lastError = null
   let lastErrorKind = null
@@ -58,10 +73,10 @@ export async function runAgent({
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     if (signal?.aborted) {
       console.log('[agent] aborted by client')
-      return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, aborted: true }
+      return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, context_policy: contextPolicy, aborted: true }
     }
 
-    const messages = buildMessages(history, message)
+    const messages = buildMessages(effectiveContext.history, message)
 
     // 重试反馈作为 system 级指令追回，不伪装成 user 消息污染对话历史
     const effectivePrompt = lastError && attempt > 0
@@ -77,7 +92,7 @@ export async function runAgent({
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
-        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, aborted: true }
+        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, context_policy: contextPolicy, aborted: true }
       }
       lastError = `API 调用失败：${err.message}`
       lastErrorKind = 'api'
@@ -114,6 +129,7 @@ export async function runAgent({
     return {
       ...normalized,
       model_used: attemptModel,
+      context_policy: contextPolicy,
       usage: llmResult.usage || null,
       usage_cost: llmResult.usageCost || null,
     }
@@ -130,6 +146,7 @@ export async function runAgent({
     reply: failMsg,
     actions: [],
     model_used: modelName,
+    context_policy: contextPolicy,
     error: true,
   }
 }
@@ -188,13 +205,41 @@ function resolveAttemptModel(primaryModel, provider, attempt, lastErrorKind) {
   return jsonStableModel
 }
 
+function resolveContextPolicy() {
+  const raw = (
+    process.env.FOCUSTREE_CONTEXT_POLICY ||
+    process.env.FOCUSTREE_TEST_CONTEXT_ISOLATION ||
+    ''
+  ).trim().toLowerCase()
+
+  if (['persistent', 'memory', 'full', 'keep', 'false', '0', 'off'].includes(raw)) {
+    return 'persistent'
+  }
+  if (['isolated', 'test', 'fresh', 'none', 'true', '1', 'on'].includes(raw)) {
+    return 'isolated'
+  }
+
+  return process.env.NODE_ENV === 'production' ? 'persistent' : 'isolated'
+}
+
+function applyContextPolicy(context, policy) {
+  if (policy !== 'isolated') return context
+  return {
+    history: [],
+    recentSummaries: [],
+    learnedPatterns: [],
+    hitRate: null,
+  }
+}
+
 // ── Prompt 构建 ───────────────────────────────────────
 
-function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime) {
+function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime, contextPolicy) {
   const goalBlock      = formatGoalBlock(userGoal)
   const summariesBlock = formatSummariesBlock(recentSummaries)
   const hitRateBlock   = formatHitRateBlock(hitRate)
   const timeBlock      = formatTimeBlock(clientTime)
+  const contextBlock   = formatContextPolicyBlock(contextPolicy)
 
   // 大小保护：截断过长的 treeText，保留前面的高层级节点
   const MAX_TREE_LEN = 6000
@@ -218,7 +263,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
 3. 不要描述"树已清空 / 已清除 / 重新开始"等过去操作——除非本轮用户当下又要求清空。
 4. 不要在 reply 开头总结上次操作的结果。专注回答用户当下的问题。
 5. 旧 assistant 回复中的项目压缩口径不是产品规则；当前规则以本 system prompt 和当前项目树为准。
-${timeBlock}${goalBlock}${summariesBlock}${learnedBlock}${hitRateBlock}
+${contextBlock}${timeBlock}${goalBlock}${summariesBlock}${learnedBlock}${hitRateBlock}
 ## 当前项目树（括号内是节点 ID，操作时必须使用这些 ID）
 ${trimmedTree}
 
@@ -628,6 +673,14 @@ function formatSummariesBlock(summaries) {
   return `
 ## 近期会话回顾（最多 5 条，最新优先；用于理解用户最近在做什么，不要重复其内容）
 ${lines.join('\n')}
+`
+}
+
+function formatContextPolicyBlock(contextPolicy) {
+  if (contextPolicy !== 'isolated') return ''
+  return `
+## 测试上下文策略
+当前处于测试上下文隔离模式：本轮不注入旧聊天历史、会话摘要、长期画像或推荐命中率。只依据当前用户输入、当前项目树、阶段目标和本 system prompt 判断。
 `
 }
 
