@@ -59,6 +59,7 @@ npm run dev
 
 ## 项目文档
 
+- [PRODUCT_SPEC.md](./PRODUCT_SPEC.md) — 当前产品说明（产品逻辑、用户流程、核心算法）
 - [PROJECT_PLAN.md](./PROJECT_PLAN.md) — 完整设计文档（含架构、记忆系统、agent 内部机制、lessons learned、协作约定）
 - `sql/` — 数据库迁移按编号执行
 - Notion 同步页：见 PROJECT_PLAN 顶部链接
