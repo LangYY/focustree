@@ -326,9 +326,22 @@ function parseRename(text, treeData) {
  * 6. 清空全部
  */
 function parseClearAll(text) {
-  if (/^(?:清空|清除|删除)\s*(?:全部|所有|整棵|这棵)\s*(?:项目|树|节点)?\s*$/.test(text) ||
-      /^清(?:空|除)(?:面板|画板)$/.test(text)) {
-    return { matched: true, actions: [{ type: 'clear_all' }] }
+  if (
+    /^(?:清空|清除)\s*(?:全部|所有|整棵|这棵|当前|这个)?\s*(?:面板|画板|项目|树|节点|内容)?\s*$/.test(text) ||
+    /^(?:删除|删掉|删)\s*(?:全部|所有|整棵|这棵)\s*(?:项目|树|节点|内容)?\s*$/.test(text)
+  ) {
+    return {
+      matched: true,
+      reply: '已清空。（可撤销）',
+      actions: [{ type: 'clear_all' }],
+    }
+  }
+  return { matched: false }
+}
+
+function parseBareDelete(text) {
+  if (/^(?:删除|删掉|删)\s*$/.test(text)) {
+    return { matched: true, reply: '要删除哪个节点？请说完整名称，或说「删除全部」。' }
   }
   return { matched: false }
 }
@@ -363,6 +376,7 @@ export function classifyIntent(text, treeData) {
   const tryParsers = [
     parseClearAll,
     parseExpandCollapse,
+    parseBareDelete,
     parseDeleteSubtree,
     parseDelete,
     parseWeight,

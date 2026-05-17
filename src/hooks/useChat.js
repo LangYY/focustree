@@ -294,6 +294,25 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
           return
         }
 
+        if (intent.actions?.some(a => a.type === 'clear_all')) {
+          if (!window.confirm('确定要清空所有项目吗？此操作可撤销。')) {
+            const content = '已取消清空操作。'
+            const assistantMsg = {
+              id: uuid(), role: 'assistant', content,
+              kind: 'local',
+            }
+            setMessages(prev => [...prev, assistantMsg])
+            if (user) {
+              supabase.from('conversations').insert({
+                user_id: user.id, role: 'assistant', content,
+                session_id: activeSession,
+              })
+            }
+            setIsLoading(false)
+            return
+          }
+        }
+
         // 执行 actions
         const actionLogs = []
         const newIdByName = {}
