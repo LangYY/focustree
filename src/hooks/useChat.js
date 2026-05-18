@@ -426,7 +426,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         const actionLogs = []
         const newIdByName = {}
         if (intent.actions?.length && treeActions) {
-          for (const action of intent.actions) {
+          const executableActions = withGeneratedChildWeights(intent.actions.map(normalizeDraftAction))
+          for (const action of executableActions) {
             if (action.parent && newIdByName[action.parent]) {
               action.parent = newIdByName[action.parent]
             }
@@ -512,7 +513,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       }
 
       if (actions?.length) {
-        for (const action of actions) {
+        const executableActions = withGeneratedChildWeights(actions.map(normalizeDraftAction))
+        for (const action of executableActions) {
           if (action.parent && newIdByName[action.parent]) {
             action.parent = newIdByName[action.parent]
           }
@@ -858,6 +860,7 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'task', parentId: action.parent,
           annotations: action.annotations,
+          weight: readActionWeight(action) ?? 1,
         })
         return { log: `已添加任务「${action.name}」`, newId }
       }
@@ -865,6 +868,7 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'category', parentId: action.parent,
           annotations: action.annotations,
+          weight: readActionWeight(action) ?? 1,
         })
         return { log: `已添加分类「${action.name}」`, newId }
       }
@@ -920,6 +924,47 @@ function normalizeDraftAction(action) {
   }
 }
 
+function readActionWeight(action) {
+  const value = typeof action?.weight === 'string'
+    ? Number(action.weight.replace('%', '').trim())
+    : action?.weight
+  if (!Number.isFinite(value) || value < 0) return null
+  return value > 2 ? value / 100 : Math.min(2, value)
+}
+
+function withGeneratedChildWeights(actions) {
+  if (!Array.isArray(actions) || !actions.length) return []
+  const prepared = actions.map(action => ({ ...action }))
+  const groups = new Map()
+
+  prepared.forEach(action => {
+    if (!['add_task', 'add_category'].includes(action.type)) return
+    if (!action.parent) return
+    const groupKey = String(action.parent)
+    if (!groups.has(groupKey)) groups.set(groupKey, [])
+    groups.get(groupKey).push(action)
+  })
+
+  groups.forEach(groupActions => {
+    const explicit = groupActions
+      .map(readActionWeight)
+      .filter(weight => typeof weight === 'number')
+    const explicitTotal = explicit.reduce((sum, weight) => sum + weight, 0)
+    const missing = groupActions.filter(action => readActionWeight(action) == null)
+    const fallback = missing.length
+      ? Math.max(0, 1 - explicitTotal) / missing.length
+      : null
+    const equalFallback = 1 / groupActions.length
+
+    groupActions.forEach(action => {
+      const existingWeight = readActionWeight(action)
+      action.weight = existingWeight ?? (fallback && fallback > 0 ? fallback : equalFallback)
+    })
+  })
+
+  return prepared
+}
+
 function isConfirmationText(text) {
   return /^(?:确认|确认执行|应用|应用方案|按这个|按这个执行|按你说的|按你说的做|就这样|落到面板|加到面板|建出来|执行)(?:吧|。|！|!|\.)?\s*$/.test((text || '').trim())
 }
@@ -942,7 +987,7 @@ function findLatestConfirmableMessage(messages) {
 async function executeDraftActionsSafely(actions, treeActions, treeData) {
   const allowedDraftTypes = new Set(['add_project', 'add_category', 'add_task', 'annotate'])
   const draftActions = Array.isArray(actions)
-    ? actions.filter(action => allowedDraftTypes.has(action?.type))
+    ? withGeneratedChildWeights(actions.filter(action => allowedDraftTypes.has(action?.type)).map(normalizeDraftAction))
     : []
   const result = {
     attempted: draftActions.length > 0,
@@ -954,7 +999,7 @@ async function executeDraftActionsSafely(actions, treeActions, treeData) {
 
   const index = createTreeIndex(treeData)
   for (const action of draftActions) {
-    const nextAction = normalizeDraftAction(action)
+    const nextAction = { ...action }
     const existing = findExistingDraftNode(nextAction, index, result.newIdByName)
     if (existing?.id) {
       if (nextAction.name) result.newIdByName[nextAction.name] = existing.id

@@ -322,8 +322,8 @@ ${trimmedTree}
 { "type": "mark_done",    "id": "...", "name": "..." }
 { "type": "mark_active",  "id": "...", "name": "..." }
 { "type": "mark_dormant", "id": "...", "name": "..." }
-{ "type": "add_task",     "name": "...", "parent": "...", "annotations": {...} }   // annotations 可选但鼓励
-{ "type": "add_category", "name": "...", "parent": "...", "annotations": {...} }
+{ "type": "add_task",     "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }   // annotations 可选但鼓励；weight 不填时客户端会按同父级草案自动补齐
+{ "type": "add_category", "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }
 { "type": "add_project",  "name": "...", "color": "#hex", "weight": 0.0-2.0, "annotations": {...} }  // weight 默认 1.0；非用户确认的权重方案不要主动设置
 { "type": "rename",       "id": "...", "name": "..." }
 { "type": "delete",       "id": "...", "name": "..." }
@@ -376,6 +376,7 @@ ${trimmedTree}
 - reply 要有重点、有条理：一句判断逻辑 + 2-4 条主线 + 合并/暂缓说明。不要只说「已添加」。
 - thinking.brief_rationale 要给用户一眼能懂的简短思考过程，但不要输出长篇链式推理。
 - actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations。不要擅自设置非默认 weight，除非用户明确要求“按优先级/权重建”。
+- 生成 add_category / add_task 子节点时，如能确定同父级精力配比，可写 weight；不确定时可省略，客户端会按同父级生成草案自动补齐，保证每个生成子节点入库时都有 weight。
 - 不确定的信息不要硬编，放成较粗颗粒的 category，等用户补充后再细化。
 
 ## 「我该做什么 / 优先级 / 规划」类问题的核心规则
