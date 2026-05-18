@@ -83,6 +83,8 @@ AI 在梳理全局时会输出权重草案，但不会立即写入。用户需�
 
 视觉上，树枝线宽按从根节点流到当前节点的累计精力流量映射，而不是只看当前节点的局部权重。每一层分叉都会继续分流：`child_flow = parent_flow * local_share`。如果某个节点只有一个子节点，子节点继承父节点流量；只有出现多个子分支时，线条才继续变细。
 
+`local_share` 优先使用用户确认过的同级权重；如果同级子节点还没有明确权重，前端会用子树压力派生子节点权重。子树压力综合节点类型、后代数量和状态：活跃任务压力最高，已完成/暂停节点会降低压力。这样项目内部即使还没有二级权重方案，也能根据实际子任务负载呈现粗细差异。
+
 权重计算会同时结合 top-down 信号（目标、偏好、约束）和 bottom-up 信号（任务压力、阻塞、紧急性），但这只是内部计算依据。前端默认只展示最终精力配比，不把两端推导过程逐条展示给用户。
 
 ## 3. 主要用户流程
@@ -371,7 +373,7 @@ FocusTree 采用四层记忆：
 
 - Supabase flat rows 先通过 `flatToTree` 转成树。
 - D3 `hierarchy` + `tree` 计算布局。
-- link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。
+- link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。每条 link 还带有 `data-flow`、`data-local-share`、`data-branch-pressure`，方便测试权重分配。
 - 节点颜色由 type 和 status 决定。
 
 交互：

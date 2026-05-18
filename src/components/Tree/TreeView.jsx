@@ -30,23 +30,55 @@ function normalizedWeight(value) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : 1
 }
 
+function statusPressureMultiplier(status) {
+  if (status === 'done') return 0.25
+  if (status === 'dormant') return 0.45
+  return 1
+}
+
+function nodeBasePressure(node) {
+  if (node?.type === 'task') return 1
+  if (node?.type === 'category') return 0.7
+  if (node?.type === 'project') return 0.9
+  return 0
+}
+
+function branchPressure(node) {
+  if (!node) return 0.1
+  const children = Array.isArray(node.children) ? node.children : []
+  const childPressure = children.reduce((sum, child) => sum + branchPressure(child), 0)
+  const base = nodeBasePressure(node)
+  const pressure = Math.max(0.1, base + childPressure)
+  return pressure * statusPressureMultiplier(node.status)
+}
+
 function childLocalShares(children) {
   if (!children?.length) return []
   if (children.length === 1) return [1]
 
   const weights = children.map(child => normalizedWeight(child.data?.weight))
   const hasNegotiatedWeight = weights.some(weight => weight > 0 && weight < 0.95)
+  const pressures = children.map(child => branchPressure(child.data))
 
   if (!hasNegotiatedWeight) {
-    return children.map(() => 1 / children.length)
+    const totalPressure = pressures.reduce((sum, pressure) => sum + pressure, 0)
+    return totalPressure > 0
+      ? pressures.map(pressure => pressure / totalPressure)
+      : children.map(() => 1 / children.length)
   }
 
   const explicitWeights = weights.filter(weight => weight > 0 && weight < 0.95)
-  const fallbackWeight = explicitWeights.length
+  const averageExplicitWeight = explicitWeights.length
     ? explicitWeights.reduce((sum, weight) => sum + weight, 0) / explicitWeights.length
     : 1 / children.length
-  const shareWeights = weights.map(weight => (
-    weight > 0 && weight < 0.95 ? weight : fallbackWeight
+  const unweightedPressures = pressures.filter((_, index) => !(weights[index] > 0 && weights[index] < 0.95))
+  const averageUnweightedPressure = unweightedPressures.length
+    ? unweightedPressures.reduce((sum, pressure) => sum + pressure, 0) / unweightedPressures.length
+    : 1
+  const shareWeights = weights.map((weight, index) => (
+    weight > 0 && weight < 0.95
+      ? weight
+      : averageExplicitWeight * (pressures[index] / Math.max(0.1, averageUnweightedPressure))
   ))
   const total = shareWeights.reduce((sum, weight) => sum + weight, 0)
   return total > 0
@@ -63,6 +95,7 @@ function assignCumulativeFlow(root) {
     node.children.forEach((child, index) => {
       const localShare = shares[index] ?? (1 / node.children.length)
       child.__localShare = localShare
+      child.__branchPressure = branchPressure(child.data)
       child.__flow = (node.__flow ?? 1) * localShare
     })
   })
@@ -137,6 +170,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('data-target-id', d => d.target.data.id || '')
       .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
       .attr('data-local-share', d => Number.isFinite(d.target.__localShare) ? d.target.__localShare.toFixed(4) : '')
+      .attr('data-branch-pressure', d => Number.isFinite(d.target.__branchPressure) ? d.target.__branchPressure.toFixed(2) : '')
       .attr('stroke', d =>
         d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
       )
