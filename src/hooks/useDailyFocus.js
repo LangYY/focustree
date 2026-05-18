@@ -40,7 +40,7 @@ export function useDailyFocus(user, treeData, userGoal, recentSummaries, learned
     if (!user || generating) return
     setGenerating(true)
     try {
-      const treeText = treeToPromptText(treeData)
+      const treeText = treeToPromptText(treeData, userGoal)
       const clientTime = getClientTime()
       const res = await fetch('/api/daily-focus', {
         method: 'POST',

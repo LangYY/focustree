@@ -79,13 +79,13 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 - 同一父节点下的核心分支建议总和约等于 100%。
 - 普通 task 默认不设权重，除非用户明确要求。
 
-AI 在梳理全局时会输出权重草案，但不会立即写入。用户需要点击“应用权重方案”或明确确认后，才会归一化并写入 `nodes.weight`。
+AI 在梳理全局时会输出权重草案，但不会立即写入。用户需要点击“应用权重方案”或明确确认后，才会归一化并写入 `nodes.weight`。`nodes.weight` 是输入之一，不是整套算法的唯一事实来源；显示、推荐和 AI 上下文都使用运行时派生的节点 meta。
 
-所有 AI 生成的子节点都会写入 `weight`。如果模型没有在 `add_category` / `add_task` action 里显式给出权重，客户端执行前会按同一父节点下的生成草案自动补齐：同父级多子节点默认均分；若部分节点已有明确权重，则剩余节点分配剩余比例。
+所有 AI 生成的子节点都会写入 `weight`。如果模型没有在 `add_category` / `add_task` action 里显式给出权重，客户端执行前会按同一父节点下的生成草案自动补齐：优先读取 annotations、紧急词、现金流/交付信号和动作具体度；只有完全没有差异信号时才均分。
 
 视觉上，树枝线宽按从根节点流到当前节点的累计精力流量映射，而不是只看当前节点的局部权重。每一层分叉都会继续分流：`child_flow = parent_flow * local_share`。如果某个节点只有一个子节点，子节点继承父节点流量；只有出现多个子分支时，线条才继续变细。
 
-`local_share` 优先使用用户确认过的同级权重；如果同级子节点还没有明确权重，前端会用子树压力派生子节点权重。子树压力综合节点类型、后代数量和状态：活跃任务压力最高，已完成/暂停节点会降低压力。这样项目内部即使还没有二级权重方案，也能根据实际子任务负载呈现粗细差异。
+`local_share` 优先使用用户确认过的同级权重；如果同级子节点还没有明确权重，或同级权重明显是自动补齐的均分值，前端会用节点 meta 重新派生本级配比。节点 meta 包括 `branch_pressure`、`goal_fit`、`completeness`、`missing_slots`、`urgency` 和 `recommendation_rank`。这样项目内部即使还没有二级权重方案，也能根据真实结构、任务负载和缺口呈现差异。
 
 节点悬浮和末端视图默认展示 `flow` 作为有效权重，避免子节点只有一个同级分支时全部显示为 100%。需要手动调整时，右键菜单仍写入该节点在同一父节点下的本级配比。
 
@@ -378,7 +378,7 @@ FocusTree 采用四层记忆：
 - Supabase flat rows 先通过 `flatToTree` 转成树。
 - D3 `hierarchy` + `tree` 计算布局。
 - link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。每条 link 还带有 `data-flow`、`data-local-share`、`data-branch-pressure`，方便测试权重分配。
-- 派生权重由 `getDerivedWeightMetaMap(tree)` 统一计算；树枝、tooltip、末端视图和 AI prompt 共用同一套 `local_share` / `flow`，避免显示和推荐上下文不一致。
+- 派生节点状态由 `computeTreeNodeMetaMap(tree, { userGoal })` 统一计算；树枝、tooltip、末端视图和 AI prompt 共用同一套 `local_share` / `flow` / `branch_pressure` / `completeness` / `recommendation_rank`，避免显示和推荐上下文不一致。
 - 节点颜色由 type 和 status 决定。
 
 交互：

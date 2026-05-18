@@ -145,12 +145,6 @@ function normalizedWeight(value) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : 1
 }
 
-function isNegotiatedWeight(value) {
-  if (value === null || value === undefined || value === '') return false
-  const weight = normalizedWeight(value)
-  return weight >= 0 && weight < 0.95
-}
-
 function statusPressureMultiplier(status) {
   if (status === 'done') return 0.25
   if (status === 'dormant') return 0.45
@@ -164,58 +158,330 @@ function nodeBasePressure(node) {
   return 0
 }
 
-export function getBranchPressure(node, cache = new WeakMap()) {
-  if (!node) return 0.1
-  if (typeof node === 'object' && cache.has(node)) return cache.get(node)
-
-  const children = Array.isArray(node.children) ? node.children : []
-  const childPressure = children.reduce((sum, child) => sum + getBranchPressure(child, cache), 0)
-  const base = nodeBasePressure(node)
-  const pressure = Math.max(0.1, base + childPressure) * statusPressureMultiplier(node.status)
-
-  if (typeof node === 'object') cache.set(node, pressure)
-  return pressure
-}
-
 function normalizeShares(values, fallbackCount) {
   const total = values.reduce((sum, value) => sum + value, 0)
   if (total > 0) return values.map(value => value / total)
   return Array.from({ length: fallbackCount }, () => fallbackCount ? 1 / fallbackCount : 0)
 }
 
-export function getChildLocalShares(children, pressureCache = new WeakMap()) {
+function clamp(value, min = 0, max = 1) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return min
+  return Math.max(min, Math.min(max, numeric))
+}
+
+function goalTextOf(userGoal) {
+  if (!userGoal) return ''
+  if (typeof userGoal === 'string') return userGoal
+  return [
+    userGoal.text,
+    ...(Array.isArray(userGoal.constraints) ? userGoal.constraints : []),
+  ].filter(Boolean).join(' ')
+}
+
+function goalExcludeTextOf(userGoal) {
+  if (!userGoal || typeof userGoal === 'string') return ''
+  return (Array.isArray(userGoal.exclude) ? userGoal.exclude : []).filter(Boolean).join(' ')
+}
+
+function nodeTextOf(node) {
+  const a = node?.annotations || {}
+  const roi = a.roi_type && typeof a.roi_type === 'object'
+    ? Object.keys(a.roi_type).join(' ')
+    : ''
+  return [
+    node?.name,
+    node?.summary,
+    a.strategic_tag,
+    a.time_horizon,
+    a.energy_cost,
+    a.risk,
+    a.ai_notes,
+    roi,
+  ].filter(Boolean).join(' ')
+}
+
+function compactText(text) {
+  return String(text || '').toLowerCase().replace(/\s+/g, '')
+}
+
+function textIncludesAny(text, words) {
+  const normalized = compactText(text)
+  return words.some(word => normalized.includes(compactText(word)))
+}
+
+const GOAL_KEYWORD_GROUPS = [
+  ['现金', '收入', '赚钱', '变现', '外包', '客户', '商业', '自由职业', '报价'],
+  ['内容', 'b站', '哔哩', '视频', '频道', 'youtube', '小红书', '账号', '短剧', '脚本'],
+  ['求职', '简历', '面试', '作品集', '投递', '找工作', '岗位'],
+  ['健康', '医院', '答辩', '课题', '结题', '论文', '汇报'],
+  ['学习', '课程', '读书', '训练', '练习', '技能'],
+]
+
+function tokenOverlapScore(goalText, nodeText) {
+  const goal = compactText(goalText)
+  const node = compactText(nodeText)
+  if (!goal || !node) return 0
+
+  const latinTokens = goal.match(/[a-z0-9]{2,}/g) || []
+  const chineseTokens = goal.match(/[\u4e00-\u9fff]{2,4}/g) || []
+  const tokens = Array.from(new Set([
+    ...latinTokens,
+    ...chineseTokens,
+  ])).filter(token => token.length >= 2)
+
+  if (!tokens.length) return 0
+  const hits = tokens.filter(token => node.includes(token)).length
+  return Math.min(0.35, hits * 0.07)
+}
+
+function goalFitScore(node, userGoal) {
+  const goalText = goalTextOf(userGoal)
+  if (!goalText) return 0.5
+
+  const nodeText = nodeTextOf(node)
+  let score = 0.15 + tokenOverlapScore(goalText, nodeText)
+
+  for (const group of GOAL_KEYWORD_GROUPS) {
+    if (textIncludesAny(goalText, group) && textIncludesAny(nodeText, group)) {
+      score += 0.22
+    }
+  }
+
+  const excludeText = goalExcludeTextOf(userGoal)
+  if (excludeText && textIncludesAny(nodeText, excludeText.split(/[,\s，、]+/).filter(Boolean))) {
+    score -= 0.35
+  }
+
+  return clamp(score, 0, 1)
+}
+
+function urgencyScore(node) {
+  const a = node?.annotations || {}
+  let score = 0
+
+  if (a.time_horizon === '立即') score += 0.8
+  if (a.time_horizon === '短期') score += 0.45
+  if (a.time_horizon === '中期') score += 0.18
+
+  const text = nodeTextOf(node)
+  if (/今天|明天|本周|这周|周内|月底|月内|截止|deadline|答辩|交付|提交|到期|清零|紧急/i.test(text)) {
+    score += 0.45
+  }
+  if (a.risk === '确定性') score += 0.08
+  if (a.strategic_tag === '现金流') score += 0.12
+
+  return clamp(score, 0, 1)
+}
+
+function hasTaskDescendant(childMetas) {
+  return childMetas.some(meta => meta.taskCount > 0)
+}
+
+function taskSpecificity(node) {
+  const text = String(node?.name || '')
+  let score = 0.35
+  if (text.length >= 6) score += 0.15
+  if (/写|剪|做|发|发布|联系|整理|提交|更新|修改|检查|录|拍|画|设计|部署|修复|预约|确认|完成|制作/.test(text)) score += 0.25
+  if (/稿|脚本|视频|邮件|简历|作品集|清单|方案|页面|版本|初稿|报价|分镜|文案|报告/.test(text)) score += 0.18
+  if (/项目|平台|账号|方向|计划|想法|构思|灵感$/.test(text)) score -= 0.18
+  return clamp(score, 0.2, 1)
+}
+
+function completenessFor(node, childMetas) {
+  if (!node || node.type === 'root') return { completeness: 1, missingSlots: [] }
+  if (node.status === 'done') return { completeness: 1, missingSlots: [] }
+
+  const children = Array.isArray(node.children) ? node.children : []
+  const missingSlots = []
+  let score = 0
+
+  if (node.type === 'task') {
+    score = taskSpecificity(node)
+    if (score < 0.7) missingSlots.push('具体动作/产出物')
+    if (!node.annotations) missingSlots.push('策略标签')
+    return { completeness: clamp(score, 0, 1), missingSlots }
+  }
+
+  if (node.type === 'project') {
+    score = 0.25
+    if (children.length) score += 0.2
+    else missingSlots.push('方向/模块')
+
+    if (children.some(child => child.type === 'category')) score += 0.2
+    else missingSlots.push('项目模块')
+
+    if (hasTaskDescendant(childMetas)) score += 0.25
+    else missingSlots.push('关键下一步')
+
+    if (childMetas.some(meta => meta.activeTaskCount > 0)) score += 0.1
+    else missingSlots.push('进行中任务')
+
+    return { completeness: clamp(score, 0, 1), missingSlots: [...new Set(missingSlots)] }
+  }
+
+  if (node.type === 'category') {
+    score = 0.3
+    if (children.length) score += 0.22
+    else missingSlots.push('可执行任务')
+
+    if (children.some(child => child.type === 'task') || hasTaskDescendant(childMetas)) score += 0.3
+    else missingSlots.push('任务拆解')
+
+    if (childMetas.some(meta => meta.activeTaskCount > 0)) score += 0.13
+    if (node.annotations) score += 0.05
+
+    return { completeness: clamp(score, 0, 1), missingSlots: [...new Set(missingSlots)] }
+  }
+
+  return { completeness: 0.5, missingSlots: [] }
+}
+
+function weightLooksLocked(children) {
+  if (!children?.length || children.length === 1) return children?.map(() => false) || []
+
+  const hasWeight = children.map(child => child?.weight !== null && child?.weight !== undefined)
+  const weights = children.map(child => normalizedWeight(child?.weight))
+  const candidates = weights.map((weight, index) => hasWeight[index] && weight >= 0 && weight < 0.95)
+  if (!candidates.some(Boolean)) return children.map(() => false)
+
+  const candidateWeights = weights.filter((_, index) => candidates[index])
+  const min = Math.min(...candidateWeights)
+  const max = Math.max(...candidateWeights)
+  const sum = candidateWeights.reduce((total, weight) => total + weight, 0)
+  const evenShare = 1 / children.length
+  const looksAutoEven =
+    candidateWeights.length === children.length &&
+    max - min <= 0.015 &&
+    Math.abs(sum - 1) <= 0.08 &&
+    candidateWeights.every(weight => Math.abs(weight - evenShare) <= 0.04)
+
+  if (looksAutoEven) return children.map(() => false)
+  return candidates
+}
+
+function childLocalSharesFromMeta(children, metaByNode) {
   if (!children?.length) return []
   if (children.length === 1) return [1]
 
-  const pressures = children.map(child => getBranchPressure(child, pressureCache))
-  const explicit = children.map(child => isNegotiatedWeight(child?.weight))
-
-  if (!explicit.some(Boolean)) {
-    return normalizeShares(pressures, children.length)
-  }
-
+  const locked = weightLooksLocked(children)
+  const hasLocked = locked.some(Boolean)
   const weights = children.map(child => normalizedWeight(child?.weight))
-  const explicitTotal = weights.reduce((sum, weight, index) => (
-    explicit[index] ? sum + weight : sum
-  ), 0)
-  const hasUnweighted = explicit.some(flag => !flag)
+  const scores = children.map(child => metaByNode.get(child)?.allocationScore ?? 0.1)
 
-  if (hasUnweighted && explicitTotal < 1) {
-    const remaining = 1 - explicitTotal
-    const unweightedPressureTotal = pressures.reduce((sum, pressure, index) => (
-      explicit[index] ? sum : sum + pressure
-    ), 0)
+  if (!hasLocked) return normalizeShares(scores, children.length)
 
-    return normalizeShares(children.map((_, index) => {
-      if (explicit[index]) return weights[index]
-      if (unweightedPressureTotal <= 0) return remaining / children.length
-      return remaining * (pressures[index] / unweightedPressureTotal)
-    }), children.length)
+  const lockedTotal = weights.reduce((sum, weight, index) => locked[index] ? sum + weight : sum, 0)
+  const unlockedScoreTotal = scores.reduce((sum, score, index) => locked[index] ? sum : sum + score, 0)
+
+  if (lockedTotal >= 1) {
+    return normalizeShares(children.map((_, index) => locked[index] ? weights[index] : 0), children.length)
   }
 
-  return normalizeShares(children.map((_, index) => (
-    explicit[index] ? weights[index] : 0
-  )), children.length)
+  const remaining = 1 - lockedTotal
+  return normalizeShares(children.map((_, index) => {
+    if (locked[index]) return weights[index]
+    if (unlockedScoreTotal <= 0) return remaining / children.length
+    return remaining * (scores[index] / unlockedScoreTotal)
+  }), children.length)
+}
+
+export function computeTreeNodeMetaMap(tree, options = {}) {
+  const metaById = new Map()
+  if (!tree) return metaById
+
+  const metaByNode = new WeakMap()
+  const userGoal = options.goal ?? options.userGoal ?? null
+
+  function analyze(node, depth = 0) {
+    const children = Array.isArray(node?.children) ? node.children : []
+    const childMetas = children.map(child => analyze(child, depth + 1))
+    const { completeness, missingSlots } = completenessFor(node, childMetas)
+    const goalFit = goalFitScore(node, userGoal)
+    const urgency = urgencyScore(node)
+    const statusMultiplier = statusPressureMultiplier(node?.status)
+    const childPressure = childMetas.reduce((sum, meta) => sum + meta.branchPressure, 0)
+    const selfPressure = nodeBasePressure(node) + urgency * 0.8 + (1 - completeness) * 0.65
+    const branchPressure = Math.max(0.05, (selfPressure + childPressure) * statusMultiplier)
+    const taskCount = (node?.type === 'task' ? 1 : 0) + childMetas.reduce((sum, meta) => sum + meta.taskCount, 0)
+    const activeTaskCount = (node?.type === 'task' && node.status !== 'done' && node.status !== 'dormant' ? 1 : 0) +
+      childMetas.reduce((sum, meta) => sum + meta.activeTaskCount, 0)
+    const descendantCount = childMetas.reduce((sum, meta) => sum + 1 + meta.descendantCount, 0)
+    const pressureSignal = Math.sqrt(branchPressure)
+    const allocationScore = Math.max(
+      0.05,
+      pressureSignal * 0.5 +
+        goalFit * 0.65 +
+        urgency * 0.45 +
+        (1 - completeness) * 0.28 +
+        Math.min(0.35, activeTaskCount * 0.06)
+    )
+
+    const meta = {
+      depth,
+      branchPressure,
+      goalFit,
+      completeness,
+      missingSlots,
+      urgency,
+      taskCount,
+      activeTaskCount,
+      descendantCount,
+      allocationScore,
+      localShare: 1,
+      flow: 1,
+      recommendationRank: 0,
+    }
+    metaByNode.set(node, meta)
+    return meta
+  }
+
+  function assignFlow(node, flow = 1, localShare = 1) {
+    const meta = metaByNode.get(node)
+    if (!meta) return
+
+    meta.flow = flow
+    meta.localShare = localShare
+    const pressureRank = clamp(meta.branchPressure / (meta.branchPressure + 4))
+    const statusPenalty = node?.status === 'done' ? 0.35 : node?.status === 'dormant' ? 0.18 : 0
+    meta.recommendationRank = clamp(
+      flow * 0.48 +
+        pressureRank * 0.18 +
+        meta.goalFit * 0.16 +
+        meta.urgency * 0.12 +
+        (1 - meta.completeness) * 0.06 -
+        statusPenalty
+    )
+    setMeta(metaById, node?.id, { ...meta })
+
+    const children = Array.isArray(node?.children) ? node.children : []
+    if (!children.length) return
+    const shares = childLocalSharesFromMeta(children, metaByNode)
+    children.forEach((child, index) => {
+      const childLocalShare = shares[index] ?? (1 / children.length)
+      assignFlow(child, flow * childLocalShare, childLocalShare)
+    })
+  }
+
+  analyze(tree)
+  assignFlow(tree)
+  return metaById
+}
+
+export function getBranchPressure(node, cache = new WeakMap()) {
+  if (!node) return 0.1
+  if (typeof node === 'object' && cache.has(node)) return cache.get(node)
+  const meta = computeTreeNodeMetaMap(node).get(node.id)
+  const pressure = meta?.branchPressure ?? 0.1
+  if (typeof node === 'object') cache.set(node, pressure)
+  return pressure
+}
+
+export function getChildLocalShares(children) {
+  if (!children?.length) return []
+  const tree = { id: '__tmp_root__', type: 'root', children }
+  const metaById = computeTreeNodeMetaMap(tree)
+  return children.map(child => getDerivedWeightMeta(metaById, child)?.localShare ?? (1 / children.length))
 }
 
 function setMeta(metaById, id, meta) {
@@ -224,28 +490,8 @@ function setMeta(metaById, id, meta) {
   metaById.set(String(id), meta)
 }
 
-export function getDerivedWeightMetaMap(tree) {
-  const metaById = new Map()
-  if (!tree) return metaById
-
-  const pressureCache = new WeakMap()
-
-  function walk(node, flow = 1, localShare = 1) {
-    const branchPressure = getBranchPressure(node, pressureCache)
-    setMeta(metaById, node?.id, { flow, localShare, branchPressure })
-
-    const children = Array.isArray(node?.children) ? node.children : []
-    if (!children.length) return
-
-    const shares = getChildLocalShares(children, pressureCache)
-    children.forEach((child, index) => {
-      const childLocalShare = shares[index] ?? (1 / children.length)
-      walk(child, flow * childLocalShare, childLocalShare)
-    })
-  }
-
-  walk(tree)
-  return metaById
+export function getDerivedWeightMetaMap(tree, options = {}) {
+  return computeTreeNodeMetaMap(tree, options)
 }
 
 export function getDerivedWeightMeta(metaById, node) {
@@ -265,11 +511,11 @@ export function findNodeById(tree, id) {
 }
 
 /** 把树结构序列化成 AI 可读的文字 + ID 列表 */
-export function treeToPromptText(tree) {
+export function treeToPromptText(tree, userGoal = null) {
   if (!tree) return '（暂无项目）'
   const lines = []
   const STATUS = { active: '▶', done: '✓', dormant: '⏸' }
-  const metaById = getDerivedWeightMetaMap(tree)
+  const metaById = computeTreeNodeMetaMap(tree, { userGoal })
 
   function annoTag(node) {
     const a = node.annotations
@@ -290,7 +536,11 @@ export function treeToPromptText(tree) {
     const wPct = Math.round((meta?.localShare ?? node.weight ?? 1) * 100)
     const flowPct = Math.round((meta?.flow ?? meta?.localShare ?? node.weight ?? 1) * 100)
     const weightText = flowPct === wPct ? `w:${wPct}%` : `w:${wPct}% flow:${flowPct}%`
-    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} ${weightText})${annoTag(node)}`)
+    const metaText = meta
+      ? ` pressure:${meta.branchPressure.toFixed(1)} complete:${Math.round(meta.completeness * 100)}% goal:${Math.round(meta.goalFit * 100)}% rank:${Math.round(meta.recommendationRank * 100)}%`
+      : ''
+    const missingText = meta?.missingSlots?.length ? ` missing:${meta.missingSlots.join('/')}` : ''
+    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} ${weightText}${metaText}${missingText})${annoTag(node)}`)
     node.children?.forEach(c => walk(c, depth + 1))
   }
   walk(tree, 0)

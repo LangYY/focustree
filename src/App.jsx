@@ -262,6 +262,7 @@ export default function App() {
           ) : leafView ? (
             <LeafView
               treeData={treeData}
+              userGoal={goal}
               onStatusChange={(id, status) => updateStatus(id, status)}
             />
           ) : (
@@ -278,6 +279,7 @@ export default function App() {
               />
               <TreeView
                 treeData={treeData}
+                userGoal={goal}
                 density={density}
                 onNodeSelect={node => setHighlightedNodeId(node.id)}
                 onNodeToggle={node => toggleNode(node.id)}

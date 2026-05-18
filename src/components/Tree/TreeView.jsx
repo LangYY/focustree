@@ -32,13 +32,18 @@ function countDescendants(node) {
   return n
 }
 
-function assignCumulativeFlow(root) {
-  const metaById = getDerivedWeightMetaMap(root.data)
+function assignCumulativeFlow(root, userGoal) {
+  const metaById = getDerivedWeightMetaMap(root.data, { userGoal })
   root.eachBefore(node => {
     const meta = getDerivedWeightMeta(metaById, node.data)
     node.__flow = meta?.flow ?? 1
     node.__localShare = meta?.localShare ?? 1
     node.__branchPressure = meta?.branchPressure ?? 0.1
+    node.__goalFit = meta?.goalFit ?? 0.5
+    node.__completeness = meta?.completeness ?? 1
+    node.__missingSlots = meta?.missingSlots ?? []
+    node.__recommendationRank = meta?.recommendationRank ?? 0
+    node.__urgency = meta?.urgency ?? 0
   })
 }
 
@@ -59,10 +64,15 @@ function withDerivedWeightMeta(hNode) {
     __flow: hNode.__flow,
     __localShare: hNode.__localShare,
     __branchPressure: hNode.__branchPressure,
+    __goalFit: hNode.__goalFit,
+    __completeness: hNode.__completeness,
+    __missingSlots: hNode.__missingSlots,
+    __recommendationRank: hNode.__recommendationRank,
+    __urgency: hNode.__urgency,
   }
 }
 
-export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
+export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
   const zoomRef = useRef(null)
@@ -96,7 +106,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     const height = svgRef.current.clientHeight
 
     const root = d3.hierarchy(treeData, d => d.expanded === false ? null : d.children)
-    assignCumulativeFlow(root)
+    assignCumulativeFlow(root, userGoal)
     const treeLayout = d3.tree()
       .nodeSize([NODE_V_GAP, NODE_H_GAP])
       .separation((a, b) => {
@@ -122,6 +132,9 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
       .attr('data-local-share', d => Number.isFinite(d.target.__localShare) ? d.target.__localShare.toFixed(4) : '')
       .attr('data-branch-pressure', d => Number.isFinite(d.target.__branchPressure) ? d.target.__branchPressure.toFixed(2) : '')
+      .attr('data-completeness', d => Number.isFinite(d.target.__completeness) ? d.target.__completeness.toFixed(2) : '')
+      .attr('data-goal-fit', d => Number.isFinite(d.target.__goalFit) ? d.target.__goalFit.toFixed(2) : '')
+      .attr('data-recommendation-rank', d => Number.isFinite(d.target.__recommendationRank) ? d.target.__recommendationRank.toFixed(2) : '')
       .attr('stroke', d =>
         d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
       )
@@ -272,7 +285,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     const offsetY = (height - treeH) / 2 - minY + 30
     g.attr('transform', `translate(${offsetX},${offsetY})`)
 
-  }, [treeData, density])
+  }, [treeData, userGoal, density])
 
   // ── 高亮：监听 highlightedNodeId 变化，更新节点圆圈 + 祖先路径 ──
   useEffect(() => {

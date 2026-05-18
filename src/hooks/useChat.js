@@ -469,7 +469,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
 
     try {
-      const treeText = treeToPromptText(treeData)
+      const treeText = treeToPromptText(treeData, userGoal)
       const nodeIds  = treeData
         ? flattenTree(treeData).map(n => n.id).filter(Boolean)
         : []
@@ -932,6 +932,31 @@ function readActionWeight(action) {
   return value > 2 ? value / 100 : Math.min(2, value)
 }
 
+function generatedChildWeightScore(action) {
+  const annotations = action?.annotations || {}
+  const text = [
+    action?.name,
+    annotations.strategic_tag,
+    annotations.time_horizon,
+    annotations.energy_cost,
+    annotations.risk,
+    annotations.ai_notes,
+    annotations.roi_type && typeof annotations.roi_type === 'object'
+      ? Object.keys(annotations.roi_type).join(' ')
+      : '',
+  ].filter(Boolean).join(' ')
+
+  let score = action?.type === 'add_task' ? 1 : 0.8
+  if (annotations.time_horizon === '立即') score += 0.75
+  if (annotations.time_horizon === '短期') score += 0.4
+  if (annotations.strategic_tag === '现金流') score += 0.35
+  if (annotations.risk === '确定性') score += 0.12
+  if (/今天|明天|本周|截止|答辩|交付|提交|清零|紧急/i.test(text)) score += 0.35
+  if (/写|剪|做|发|联系|整理|提交|更新|制作|修复|完成/.test(text)) score += 0.15
+  if (/想法|构思|灵感|待定|以后|暂缓/.test(text)) score -= 0.25
+  return Math.max(0.1, score)
+}
+
 function withGeneratedChildWeights(actions) {
   if (!Array.isArray(actions) || !actions.length) return []
   const prepared = actions.map(action => ({ ...action }))
@@ -951,14 +976,22 @@ function withGeneratedChildWeights(actions) {
       .filter(weight => typeof weight === 'number')
     const explicitTotal = explicit.reduce((sum, weight) => sum + weight, 0)
     const missing = groupActions.filter(action => readActionWeight(action) == null)
-    const fallback = missing.length
-      ? Math.max(0, 1 - explicitTotal) / missing.length
-      : null
+    const remaining = Math.max(0, 1 - explicitTotal)
+    const missingScores = missing.map(generatedChildWeightScore)
+    const missingScoreTotal = missingScores.reduce((sum, score) => sum + score, 0)
     const equalFallback = 1 / groupActions.length
 
     groupActions.forEach(action => {
       const existingWeight = readActionWeight(action)
-      action.weight = existingWeight ?? (fallback && fallback > 0 ? fallback : equalFallback)
+      if (existingWeight != null) {
+        action.weight = existingWeight
+        return
+      }
+      const missingIndex = missing.indexOf(action)
+      const score = missingScores[missingIndex] ?? 0
+      action.weight = remaining <= 0
+        ? 0
+        : (missingScoreTotal > 0 ? remaining * (score / missingScoreTotal) : equalFallback)
     })
   })
 

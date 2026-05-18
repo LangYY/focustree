@@ -14,6 +14,10 @@ export default function NodeTooltip({ x, y, node }) {
   const localPct = Math.round(localShare * 100)
   const effectivePct = Math.round(effectiveShare * 100)
   const showLocalShare = Math.abs(effectiveShare - localShare) > 0.005
+  const completenessPct = Math.round(safeRatio(node.__completeness ?? 1) * 100)
+  const rankPct = Math.round(safeRatio(node.__recommendationRank ?? 0, 0) * 100)
+  const pressure = Number(node.__branchPressure)
+  const missingSlots = Array.isArray(node.__missingSlots) ? node.__missingSlots : []
 
   const style = {
     position: 'fixed',
@@ -49,6 +53,22 @@ export default function NodeTooltip({ x, y, node }) {
           {showLocalShare && (
             <span className="text-gray-600"> · 本级 {localPct}%</span>
           )}
+        </div>
+      )}
+
+      <div className="text-gray-500 mt-0.5">
+        完整度 {completenessPct}% · 推荐分 {rankPct}%
+      </div>
+
+      {Number.isFinite(pressure) && (
+        <div className="text-gray-600 mt-0.5">
+          分支压力 {pressure.toFixed(1)}
+        </div>
+      )}
+
+      {missingSlots.length > 0 && (
+        <div className="text-amber-400/80 mt-1">
+          缺：{missingSlots.slice(0, 3).join('、')}
         </div>
       )}
 
