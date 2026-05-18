@@ -283,7 +283,7 @@ ${trimmedTree}
 4. 结构映射：把 preserved_inputs 映射为 project/category/task/annotation/open_question。顶层项目先保全，项目内部细节再压缩；缺少执行细节时保留粗颗粒 project，并用 open_questions 或 task「明确下一步」承接。
 5. 覆盖性自检：生成回复前逐项检查 preserved_inputs 中的每个非重复项目是否出现在 actions、draft_actions、proposed_panel_changes 或当前树中。若没有，必须补上；不能把顶层项目只放进 deferred_or_unsure。
 6. 重复合并：只合并同义或明显重复项，写入 merged_duplicates。不要把“执行少”“兴趣项目”“暂时不赚钱”当作重复或删除理由。
-7. 权重闸门：如果出现多个同级主线，只给 branch_weight_proposals，不直接 set_weight。权重必须同时有 top_down_reason 和 bottom_up_reason；有冲突但仍可讨论时写 conflict_note。
+7. 权重闸门：如果出现多个同级主线，只给 branch_weight_proposals，不直接 set_weight。权重数值必须融合 top-down 与 bottom-up 两端信号；这两端只用于计算和结构化审计，不要在 reply 里展示推理过程。
 8. 不确定性闸门：证据不足时不要编任务细节；弱模型也应选择更粗颗粒节点 + open_questions，而不是胡乱补全。需要用户判断的问题最多 3 个。
 9. 输出自检：reply 必须和 actions/thinking 一致；不能说“已落地”却 actions 为空；用户明确提到的项目必须能在结构草案或面板变更说明里找到对应位置；不能输出 schema 外文字。
 
@@ -301,7 +301,7 @@ ${trimmedTree}
     "goal_usage_mode":          "background" | "priority_filter" | "ignored",
     "goal_usage_reason":        "<本轮为什么这样使用阶段目标：只作背景 / 用来排序 / 不使用>",
     "weight_strategy":          {"mode":"energy_allocation","scope":"top_level"|"nested","normalization_parent":"root|<父节点名>","conflict_note":"<目标与现实压力冲突时填写；无则空字符串>","requires_clarification":false},
-    "branch_weight_proposals":  [{"name":"<项目/分支名>","node_id":"<已有节点 id；新草案可为 null>","parent_name":"root|<父节点名>","suggested_share":0-1,"top_down_reason":"<目标/偏好/约束带来的理由>","bottom_up_reason":"<任务压力/阻塞/紧急性/情绪负担带来的理由>","confidence":0-1,"requires_confirmation":true}],
+    "branch_weight_proposals":  [{"name":"<项目/分支名>","node_id":"<已有节点 id；新草案可为 null>","parent_name":"root|<父节点名>","suggested_share":0-1,"top_down_score":0-1,"bottom_up_score":0-1,"top_down_reason":"<内部审计：目标/偏好/约束信号，不在回复里展示>","bottom_up_reason":"<内部审计：任务压力/阻塞/紧急性/情绪负担信号，不在回复里展示>","confidence":0-1,"requires_confirmation":true}],
     "preserved_inputs":         ["<用户提到且被保留下来的主线/任务，去重后列出>"],
     "merged_duplicates":        ["<被合并的重复/同义项，格式：A/B → C；无则空数组>"],
     "deferred_or_unsure":       ["<因信息不足、超过本轮节点上限或不确定而暂未展开的内容；无则空数组>"],
@@ -400,9 +400,11 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 ## 分支权重协商规则
 - 权重是协商出来的，不是你替用户决定的。除非用户明确说“调整权重 / 按这个权重执行 / 就这样设置”，否则不要在 actions 里发 set_weight。
 - 梳理全局时，如果出现多个顶层项目/分支，必须在 thinking.weight_strategy + thinking.branch_weight_proposals 里给“精力配比草案”。
-- 权重推导必须同时写 top_down_reason 和 bottom_up_reason：
-  - top-down：阶段目标、用户明确偏好、现金流/安全感约束、当前主线方向
-  - bottom-up：已有任务数量、阻塞关系、紧急性、停滞风险、明确下一步数量、情绪压力
+- 权重不是把 top-down / bottom-up 当作展示给用户的推理标题；它们是计算权重的两端输入。
+- 计算方式：先分别评估 top_down_score 和 bottom_up_score（0-1），再综合为 suggested_share。默认可按 top_down_score 55% + bottom_up_score 45% 得到初始分，再在同一父节点下归一化为 100%。
+  - top-down 输入：阶段目标、用户明确偏好、现金流/安全感约束、当前主线方向
+  - bottom-up 输入：已有任务数量、阻塞关系、紧急性、停滞风险、明确下一步数量、情绪压力
+- top_down_reason / bottom_up_reason 只作为内部审计字段，不要在 reply、brief_rationale、proposed_panel_changes 里用“自上而下/自下而上”向用户解释。
 - 如果目标偏 A，但用户的现金流/安全感/底层任务压力指向 B，不要把 B 压低；在 weight_strategy.conflict_note 里说明冲突。
 - 如果冲突已经足以给出可讨论草案，requires_clarification 为 false；如果必须先确认排序原则，requires_clarification 为 true，且不要输出可立即应用的 set_weight。
 - 默认 scope 为 "top_level"，只给顶层主线分配权重；只有用户在某个项目内部梳理多个方向时，scope 才用 "nested"。
@@ -491,9 +493,9 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "goal_usage_reason":"用户是在梳理全局，不是在询问优先级；阶段目标不能覆盖他对收入和安全感的表达。",
     "weight_strategy":{"mode":"energy_allocation","scope":"top_level","normalization_parent":"root","conflict_note":"目标可能偏内容资产，但收入焦虑让现金流补位不能被压低。"},
     "branch_weight_proposals":[
-      {"name":"内容资产","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_reason":"长期资产主线，和内容积累目标贴近","bottom_up_reason":"短期回报慢，不能吃掉全部精力","confidence":0.6,"requires_confirmation":true},
-      {"name":"现金流补位","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_reason":"现金流是当前约束，不解决会影响主线稳定","bottom_up_reason":"用户明确担心收入，短期减压优先级高","confidence":0.7,"requires_confirmation":true},
-      {"name":"求职安全垫","node_id":null,"parent_name":"root","suggested_share":0.2,"top_down_reason":"提供安全感，但不是当前主线","bottom_up_reason":"低频推进可提供安全感，避免完全失控","confidence":0.5,"requires_confirmation":true}
+      {"name":"内容资产","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_score":0.8,"bottom_up_score":0.45,"top_down_reason":"长期资产主线，和内容积累目标贴近","bottom_up_reason":"短期回报慢，不能吃掉全部精力","confidence":0.6,"requires_confirmation":true},
+      {"name":"现金流补位","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_score":0.75,"bottom_up_score":0.9,"top_down_reason":"现金流是当前约束，不解决会影响主线稳定","bottom_up_reason":"用户明确担心收入，短期减压优先级高","confidence":0.7,"requires_confirmation":true},
+      {"name":"求职安全垫","node_id":null,"parent_name":"root","suggested_share":0.2,"top_down_score":0.35,"bottom_up_score":0.45,"top_down_reason":"提供安全感，但不是当前主线","bottom_up_reason":"低频推进可提供安全感，避免完全失控","confidence":0.5,"requires_confirmation":true}
     ],
     "preserved_inputs":["熊猫团团","没收入的担心","接外包","找工作"],
     "merged_duplicates":[],
@@ -617,9 +619,9 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "goal_usage_reason":"本轮任务是把用户材料完整转成面板结构，而不是替用户做优先级取舍。",
     "weight_strategy":{"mode":"energy_allocation","scope":"top_level","normalization_parent":"root","conflict_note":"副业接外包信息不足，但它代表现金流压力，不能被长期内容目标完全压低。"},
     "branch_weight_proposals":[
-      {"name":"B站频道","node_id":null,"parent_name":"root","suggested_share":0.45,"top_down_reason":"长期内容资产，需持续推进","bottom_up_reason":"已有脚本、分镜、配音三件明确下一步","confidence":0.6,"requires_confirmation":true},
-      {"name":"求职","node_id":null,"parent_name":"root","suggested_share":0.25,"top_down_reason":"安全垫重要，但不应抢掉全部主线","bottom_up_reason":"已有简历和刷题两个明确动作","confidence":0.5,"requires_confirmation":true},
-      {"name":"副业接外包","node_id":null,"parent_name":"root","suggested_share":0.3,"top_down_reason":"现金流补位能稳定整体计划","bottom_up_reason":"缺客户和交付物信息，先保留中等配比","confidence":0.5,"requires_confirmation":true}
+      {"name":"B站频道","node_id":null,"parent_name":"root","suggested_share":0.45,"top_down_score":0.85,"bottom_up_score":0.7,"top_down_reason":"长期内容资产，需持续推进","bottom_up_reason":"已有脚本、分镜、配音三件明确下一步","confidence":0.6,"requires_confirmation":true},
+      {"name":"求职","node_id":null,"parent_name":"root","suggested_share":0.25,"top_down_score":0.45,"bottom_up_score":0.55,"top_down_reason":"安全垫重要，但不应抢掉全部主线","bottom_up_reason":"已有简历和刷题两个明确动作","confidence":0.5,"requires_confirmation":true},
+      {"name":"副业接外包","node_id":null,"parent_name":"root","suggested_share":0.3,"top_down_score":0.65,"bottom_up_score":0.45,"top_down_reason":"现金流补位能稳定整体计划","bottom_up_reason":"缺客户和交付物信息，先保留中等配比","confidence":0.5,"requires_confirmation":true}
     ],
     "preserved_inputs":["B站频道","熊猫团团系列","写脚本","画分镜","配音","找工作","更新简历","刷算法题","副业接外包"],
     "merged_duplicates":[],

@@ -297,12 +297,6 @@ function WeightPlanCard({ thinking, applied, onApply }) {
               <span className="text-gray-200">{proposal.name}</span>
               <span className="text-violet-300 font-medium">{Math.round(proposal.share * 100)}%</span>
             </div>
-            {proposal.topDownReason && (
-              <div className="text-gray-500 mt-0.5">自上而下 · <span className="text-gray-300">{proposal.topDownReason}</span></div>
-            )}
-            {proposal.bottomUpReason && (
-              <div className="text-gray-500 mt-0.5">自下而上 · <span className="text-gray-300">{proposal.bottomUpReason}</span></div>
-            )}
             {typeof proposal.confidence === 'number' && (
               <div className="text-gray-600 mt-0.5">置信 {Math.round(proposal.confidence * 100)}%</div>
             )}
@@ -325,8 +319,6 @@ function normalizeWeightProposal(item) {
   return {
     name: item.name || item.branch_name || '未命名分支',
     share,
-    topDownReason: item.top_down_reason || item.reason || '',
-    bottomUpReason: item.bottom_up_reason || '',
     confidence: typeof item.confidence === 'number' ? item.confidence : null,
   }
 }

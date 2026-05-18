@@ -141,13 +141,14 @@ export function getLinkStrokeWidth(weight = 1, siblingWeights = null) {
       Number.isFinite(Number(w)) ? Math.max(0, Number(w)) : 1
     )
     const total = cleanWeights.reduce((sum, w) => sum + w, 0)
-    const share = total > 0 ? numeric / total : 1 / siblingWeights.length
-    const clampedShare = Math.max(0.03, Math.min(0.75, share))
-    return 1.8 + Math.sqrt(clampedShare) * 8
+    const negotiated = cleanWeights.some(w => w > 0 && w < 0.95)
+    const share = total > 0 && negotiated ? numeric / total : 1 / siblingWeights.length
+    const clampedShare = Math.max(0.04, Math.min(0.7, share))
+    return 2 + clampedShare * 18
   }
 
-  const visualWeight = numeric === 1 ? 0.25 : Math.max(0.03, Math.min(0.75, numeric))
-  return 1.8 + Math.sqrt(visualWeight) * 8
+  const visualWeight = numeric === 1 ? 0.2 : Math.max(0.04, Math.min(0.7, numeric))
+  return 2 + visualWeight * 18
 }
 
 /** 通过 ID 找节点 */

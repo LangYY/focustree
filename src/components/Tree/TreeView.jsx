@@ -30,6 +30,12 @@ function linkStrokeWidth(d) {
   return getLinkStrokeWidth(d?.target?.data?.weight, siblingWeights)
 }
 
+function applyLinkStrokeWidth(selection, extra = 0) {
+  selection
+    .attr('stroke-width', d => linkStrokeWidth(d) + extra)
+    .style('stroke-width', d => `${linkStrokeWidth(d) + extra}px`)
+}
+
 export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
@@ -89,7 +95,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('stroke', d =>
         d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
       )
-      .attr('stroke-width', d => linkStrokeWidth(d))
+      .call(selection => applyLinkStrokeWidth(selection))
       .attr('opacity', 0.45)
       .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
 
@@ -250,9 +256,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .attr('filter', null)
     g.selectAll('.link')
       .attr('opacity', 0.45)
-      .attr('stroke-width', function () {
-        const d = d3.select(this).datum()
-        return linkStrokeWidth(d)
+      .each(function () {
+        applyLinkStrokeWidth(d3.select(this))
       })
 
     if (!highlightedNodeId || !rootRef.current) return
@@ -274,9 +279,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       if (ancestorIds.has(tid)) {
         d3.select(this)
           .attr('opacity', 0.95)
-          .attr('stroke-width', function () {
-            const d = d3.select(this).datum()
-            return linkStrokeWidth(d) + 1.5
+          .each(function () {
+            applyLinkStrokeWidth(d3.select(this), 1.5)
           })
       }
     })
