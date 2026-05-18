@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
-import { getNodeRadius, getNodeColor, getLinkStrokeWidth, findNodeById } from '../../lib/treeUtils'
+import {
+  getNodeRadius,
+  getNodeColor,
+  getLinkStrokeWidth,
+  findNodeById,
+  getDerivedWeightMetaMap,
+  getDerivedWeightMeta,
+} from '../../lib/treeUtils'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
 
@@ -25,79 +32,13 @@ function countDescendants(node) {
   return n
 }
 
-function normalizedWeight(value) {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 1
-}
-
-function statusPressureMultiplier(status) {
-  if (status === 'done') return 0.25
-  if (status === 'dormant') return 0.45
-  return 1
-}
-
-function nodeBasePressure(node) {
-  if (node?.type === 'task') return 1
-  if (node?.type === 'category') return 0.7
-  if (node?.type === 'project') return 0.9
-  return 0
-}
-
-function branchPressure(node) {
-  if (!node) return 0.1
-  const children = Array.isArray(node.children) ? node.children : []
-  const childPressure = children.reduce((sum, child) => sum + branchPressure(child), 0)
-  const base = nodeBasePressure(node)
-  const pressure = Math.max(0.1, base + childPressure)
-  return pressure * statusPressureMultiplier(node.status)
-}
-
-function childLocalShares(children) {
-  if (!children?.length) return []
-  if (children.length === 1) return [1]
-
-  const weights = children.map(child => normalizedWeight(child.data?.weight))
-  const hasNegotiatedWeight = weights.some(weight => weight > 0 && weight < 0.95)
-  const pressures = children.map(child => branchPressure(child.data))
-
-  if (!hasNegotiatedWeight) {
-    const totalPressure = pressures.reduce((sum, pressure) => sum + pressure, 0)
-    return totalPressure > 0
-      ? pressures.map(pressure => pressure / totalPressure)
-      : children.map(() => 1 / children.length)
-  }
-
-  const explicitWeights = weights.filter(weight => weight > 0 && weight < 0.95)
-  const averageExplicitWeight = explicitWeights.length
-    ? explicitWeights.reduce((sum, weight) => sum + weight, 0) / explicitWeights.length
-    : 1 / children.length
-  const unweightedPressures = pressures.filter((_, index) => !(weights[index] > 0 && weights[index] < 0.95))
-  const averageUnweightedPressure = unweightedPressures.length
-    ? unweightedPressures.reduce((sum, pressure) => sum + pressure, 0) / unweightedPressures.length
-    : 1
-  const shareWeights = weights.map((weight, index) => (
-    weight > 0 && weight < 0.95
-      ? weight
-      : averageExplicitWeight * (pressures[index] / Math.max(0.1, averageUnweightedPressure))
-  ))
-  const total = shareWeights.reduce((sum, weight) => sum + weight, 0)
-  return total > 0
-    ? shareWeights.map(weight => weight / total)
-    : children.map(() => 1 / children.length)
-}
-
 function assignCumulativeFlow(root) {
-  root.__flow = 1
-  root.__localShare = 1
+  const metaById = getDerivedWeightMetaMap(root.data)
   root.eachBefore(node => {
-    if (!node.children?.length) return
-    const shares = childLocalShares(node.children)
-    node.children.forEach((child, index) => {
-      const localShare = shares[index] ?? (1 / node.children.length)
-      child.__localShare = localShare
-      child.__branchPressure = branchPressure(child.data)
-      child.__flow = (node.__flow ?? 1) * localShare
-    })
+    const meta = getDerivedWeightMeta(metaById, node.data)
+    node.__flow = meta?.flow ?? 1
+    node.__localShare = meta?.localShare ?? 1
+    node.__branchPressure = meta?.branchPressure ?? 0.1
   })
 }
 
@@ -109,6 +50,16 @@ function applyLinkStrokeWidth(selection, extra = 0) {
   selection
     .attr('stroke-width', d => linkStrokeWidth(d) + extra)
     .style('stroke-width', d => `${linkStrokeWidth(d) + extra}px`)
+}
+
+function withDerivedWeightMeta(hNode) {
+  if (!hNode?.data) return null
+  return {
+    ...hNode.data,
+    __flow: hNode.__flow,
+    __localShare: hNode.__localShare,
+    __branchPressure: hNode.__branchPressure,
+  }
 }
 
 export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
@@ -192,7 +143,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .on('click', (event, d) => {
         event.stopPropagation()
         setContextMenu(null)
-        onNodeSelect?.(d.data)
+        onNodeSelect?.(withDerivedWeightMeta(d))
       })
 
     // 双击：折叠/展开
@@ -207,13 +158,13 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .on('contextmenu', (event, d) => {
         event.preventDefault()
         event.stopPropagation()
-        setContextMenu({ x: event.clientX, y: event.clientY, node: d.data })
+        setContextMenu({ x: event.clientX, y: event.clientY, node: withDerivedWeightMeta(d) })
       })
 
     // Hover tooltip
     node.filter(d => d.data.type !== 'root')
       .on('mouseover', (event, d) => {
-        setTooltip({ x: event.clientX, y: event.clientY, node: d.data })
+        setTooltip({ x: event.clientX, y: event.clientY, node: withDerivedWeightMeta(d) })
       })
       .on('mousemove', (event) => {
         setTooltip(prev => prev ? { ...prev, x: event.clientX, y: event.clientY } : prev)

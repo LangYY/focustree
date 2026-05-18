@@ -1,8 +1,19 @@
 const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
 
+function safeRatio(value, fallback = 1) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : fallback
+}
+
 export default function NodeTooltip({ x, y, node }) {
   if (!node) return null
+
+  const localShare = safeRatio(node.__localShare ?? node.weight ?? 1)
+  const effectiveShare = safeRatio(node.__flow ?? localShare, localShare)
+  const localPct = Math.round(localShare * 100)
+  const effectivePct = Math.round(effectiveShare * 100)
+  const showLocalShare = Math.abs(effectiveShare - localShare) > 0.005
 
   const style = {
     position: 'fixed',
@@ -32,9 +43,12 @@ export default function NodeTooltip({ x, y, node }) {
         <span className="text-gray-400">{STATUS_LABEL[node.status] || node.status}</span>
       </div>
 
-      {node.weight != null && (
+      {(node.weight != null || node.__localShare != null || node.__flow != null) && (
         <div className="text-gray-500">
-          权重 {Math.round(node.weight * 100)}%
+          有效权重 {effectivePct}%
+          {showLocalShare && (
+            <span className="text-gray-600"> · 本级 {localPct}%</span>
+          )}
         </div>
       )}
 

@@ -87,6 +87,8 @@ AI 在梳理全局时会输出权重草案，但不会立即写入。用户需�
 
 `local_share` 优先使用用户确认过的同级权重；如果同级子节点还没有明确权重，前端会用子树压力派生子节点权重。子树压力综合节点类型、后代数量和状态：活跃任务压力最高，已完成/暂停节点会降低压力。这样项目内部即使还没有二级权重方案，也能根据实际子任务负载呈现粗细差异。
 
+节点悬浮和末端视图默认展示 `flow` 作为有效权重，避免子节点只有一个同级分支时全部显示为 100%。需要手动调整时，右键菜单仍写入该节点在同一父节点下的本级配比。
+
 权重计算会同时结合 top-down 信号（目标、偏好、约束）和 bottom-up 信号（任务压力、阻塞、紧急性），但这只是内部计算依据。前端默认只展示最终精力配比，不把两端推导过程逐条展示给用户。
 
 ## 3. 主要用户流程
@@ -376,6 +378,7 @@ FocusTree 采用四层记忆：
 - Supabase flat rows 先通过 `flatToTree` 转成树。
 - D3 `hierarchy` + `tree` 计算布局。
 - link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。每条 link 还带有 `data-flow`、`data-local-share`、`data-branch-pressure`，方便测试权重分配。
+- 派生权重由 `getDerivedWeightMetaMap(tree)` 统一计算；树枝、tooltip、末端视图和 AI prompt 共用同一套 `local_share` / `flow`，避免显示和推荐上下文不一致。
 - 节点颜色由 type 和 status 决定。
 
 交互：

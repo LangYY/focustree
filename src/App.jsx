@@ -163,8 +163,18 @@ export default function App() {
       await updateStatus(node.id, status)
     }
     if (action === 'weight') {
-      const current = Math.round((node.weight ?? 1) * 100)
-      const input = window.prompt(`调整「${node.name}」的权重 (0-100)：`, current)
+      const localShare = Number.isFinite(Number(node.__localShare ?? node.weight))
+        ? Math.max(0, Math.min(1, Number(node.__localShare ?? node.weight)))
+        : 1
+      const effectiveShare = Number.isFinite(Number(node.__flow))
+        ? Math.max(0, Math.min(1, Number(node.__flow)))
+        : localShare
+      const current = Math.round(localShare * 100)
+      const effective = Math.round(effectiveShare * 100)
+      const input = window.prompt(
+        `调整「${node.name}」的本级配比 (0-100)：\n当前有效权重约 ${effective}%。`,
+        current
+      )
       if (input !== null) {
         const w = Math.max(0, Math.min(100, parseInt(input) || 0))
         await updateWeight(node.id, w / 100)

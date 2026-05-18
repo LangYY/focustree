@@ -1,22 +1,37 @@
 import { useMemo } from 'react'
+import { getDerivedWeightMeta, getDerivedWeightMetaMap } from '../../lib/treeUtils'
 
 const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停' }
 
+function safePercent(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric * 100)) : 0
+}
+
 export default function LeafView({ treeData, onStatusChange }) {
   const tasks = useMemo(() => {
     const result = []
+    const metaById = getDerivedWeightMetaMap(treeData)
+
     function collect(node, projectName, projectColor) {
       if (node.type === 'task') {
-        result.push({ ...node, projectName, projectColor })
+        const meta = getDerivedWeightMeta(metaById, node)
+        result.push({
+          ...node,
+          projectName,
+          projectColor,
+          effectiveWeight: meta?.flow ?? node.weight ?? 0,
+          localShare: meta?.localShare ?? node.weight ?? 0,
+        })
       }
       const pName  = node.type === 'project' ? node.name  : projectName
       const pColor = node.type === 'project' ? node.color : projectColor
       node.children?.forEach(c => collect(c, pName, pColor))
     }
     if (treeData) collect(treeData, '', '#6b7280')
-    // 按权重降序
-    return result.sort((a, b) => (b.weight || 0) - (a.weight || 0))
+    // 按 root 到该任务的累计有效权重降序
+    return result.sort((a, b) => (b.effectiveWeight || 0) - (a.effectiveWeight || 0))
   }, [treeData])
 
   const active  = tasks.filter(t => t.status === 'active')
@@ -27,7 +42,7 @@ export default function LeafView({ treeData, onStatusChange }) {
     <div className="h-full overflow-y-auto p-6" style={{ background: '#0f1117' }}>
       <div className="max-w-2xl mx-auto">
         <h2 className="text-lg font-semibold text-gray-200 mb-1">末端视图</h2>
-        <p className="text-sm text-gray-500 mb-6">所有任务，按权重排序</p>
+        <p className="text-sm text-gray-500 mb-6">所有任务，按有效权重排序</p>
 
         <Section title="进行中" tasks={active}   onStatusChange={onStatusChange} />
         <Section title="暂停中" tasks={dormant}  onStatusChange={onStatusChange} />
@@ -96,7 +111,7 @@ function TaskRow({ task, onStatusChange, dimmed }) {
           <div
             className="h-full rounded-full"
             style={{
-              width: `${(task.weight || 0) * 100}%`,
+              width: `${safePercent(task.effectiveWeight)}%`,
               background: STATUS_COLOR[task.status] || '#6b7280',
             }}
           />

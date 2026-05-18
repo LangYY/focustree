@@ -139,6 +139,120 @@ export function getLinkStrokeWidth(flow = 1) {
   return 2 + Math.sqrt(clampedFlow) * 9
 }
 
+function normalizedWeight(value) {
+  if (value === null || value === undefined || value === '') return 1
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 1
+}
+
+function isNegotiatedWeight(value) {
+  if (value === null || value === undefined || value === '') return false
+  const weight = normalizedWeight(value)
+  return weight >= 0 && weight < 0.95
+}
+
+function statusPressureMultiplier(status) {
+  if (status === 'done') return 0.25
+  if (status === 'dormant') return 0.45
+  return 1
+}
+
+function nodeBasePressure(node) {
+  if (node?.type === 'task') return 1
+  if (node?.type === 'category') return 0.7
+  if (node?.type === 'project') return 0.9
+  return 0
+}
+
+export function getBranchPressure(node, cache = new WeakMap()) {
+  if (!node) return 0.1
+  if (typeof node === 'object' && cache.has(node)) return cache.get(node)
+
+  const children = Array.isArray(node.children) ? node.children : []
+  const childPressure = children.reduce((sum, child) => sum + getBranchPressure(child, cache), 0)
+  const base = nodeBasePressure(node)
+  const pressure = Math.max(0.1, base + childPressure) * statusPressureMultiplier(node.status)
+
+  if (typeof node === 'object') cache.set(node, pressure)
+  return pressure
+}
+
+function normalizeShares(values, fallbackCount) {
+  const total = values.reduce((sum, value) => sum + value, 0)
+  if (total > 0) return values.map(value => value / total)
+  return Array.from({ length: fallbackCount }, () => fallbackCount ? 1 / fallbackCount : 0)
+}
+
+export function getChildLocalShares(children, pressureCache = new WeakMap()) {
+  if (!children?.length) return []
+  if (children.length === 1) return [1]
+
+  const pressures = children.map(child => getBranchPressure(child, pressureCache))
+  const explicit = children.map(child => isNegotiatedWeight(child?.weight))
+
+  if (!explicit.some(Boolean)) {
+    return normalizeShares(pressures, children.length)
+  }
+
+  const weights = children.map(child => normalizedWeight(child?.weight))
+  const explicitTotal = weights.reduce((sum, weight, index) => (
+    explicit[index] ? sum + weight : sum
+  ), 0)
+  const hasUnweighted = explicit.some(flag => !flag)
+
+  if (hasUnweighted && explicitTotal < 1) {
+    const remaining = 1 - explicitTotal
+    const unweightedPressureTotal = pressures.reduce((sum, pressure, index) => (
+      explicit[index] ? sum : sum + pressure
+    ), 0)
+
+    return normalizeShares(children.map((_, index) => {
+      if (explicit[index]) return weights[index]
+      if (unweightedPressureTotal <= 0) return remaining / children.length
+      return remaining * (pressures[index] / unweightedPressureTotal)
+    }), children.length)
+  }
+
+  return normalizeShares(children.map((_, index) => (
+    explicit[index] ? weights[index] : 0
+  )), children.length)
+}
+
+function setMeta(metaById, id, meta) {
+  if (id === null || id === undefined) return
+  metaById.set(id, meta)
+  metaById.set(String(id), meta)
+}
+
+export function getDerivedWeightMetaMap(tree) {
+  const metaById = new Map()
+  if (!tree) return metaById
+
+  const pressureCache = new WeakMap()
+
+  function walk(node, flow = 1, localShare = 1) {
+    const branchPressure = getBranchPressure(node, pressureCache)
+    setMeta(metaById, node?.id, { flow, localShare, branchPressure })
+
+    const children = Array.isArray(node?.children) ? node.children : []
+    if (!children.length) return
+
+    const shares = getChildLocalShares(children, pressureCache)
+    children.forEach((child, index) => {
+      const childLocalShare = shares[index] ?? (1 / children.length)
+      walk(child, flow * childLocalShare, childLocalShare)
+    })
+  }
+
+  walk(tree)
+  return metaById
+}
+
+export function getDerivedWeightMeta(metaById, node) {
+  if (!metaById || !node) return null
+  return metaById.get(node.id) ?? metaById.get(String(node.id)) ?? null
+}
+
 /** 通过 ID 找节点 */
 export function findNodeById(tree, id) {
   if (!tree) return null
@@ -155,6 +269,7 @@ export function treeToPromptText(tree) {
   if (!tree) return '（暂无项目）'
   const lines = []
   const STATUS = { active: '▶', done: '✓', dormant: '⏸' }
+  const metaById = getDerivedWeightMetaMap(tree)
 
   function annoTag(node) {
     const a = node.annotations
@@ -171,8 +286,11 @@ export function treeToPromptText(tree) {
     if (node.type === 'root') { node.children?.forEach(c => walk(c, 0)); return }
     const indent = '  '.repeat(depth)
     const icon   = STATUS[node.status] || '▶'
-    const wPct = Math.round((node.weight ?? 1) * 100)
-    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} w:${wPct}%)${annoTag(node)}`)
+    const meta = getDerivedWeightMeta(metaById, node)
+    const wPct = Math.round((meta?.localShare ?? node.weight ?? 1) * 100)
+    const flowPct = Math.round((meta?.flow ?? meta?.localShare ?? node.weight ?? 1) * 100)
+    const weightText = flowPct === wPct ? `w:${wPct}%` : `w:${wPct}% flow:${flowPct}%`
+    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} ${weightText})${annoTag(node)}`)
     node.children?.forEach(c => walk(c, depth + 1))
   }
   walk(tree, 0)
