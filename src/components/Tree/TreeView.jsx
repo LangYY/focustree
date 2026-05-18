@@ -25,9 +25,51 @@ function countDescendants(node) {
   return n
 }
 
+function normalizedWeight(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 1
+}
+
+function childLocalShares(children) {
+  if (!children?.length) return []
+  if (children.length === 1) return [1]
+
+  const weights = children.map(child => normalizedWeight(child.data?.weight))
+  const hasNegotiatedWeight = weights.some(weight => weight > 0 && weight < 0.95)
+
+  if (!hasNegotiatedWeight) {
+    return children.map(() => 1 / children.length)
+  }
+
+  const explicitWeights = weights.filter(weight => weight > 0 && weight < 0.95)
+  const fallbackWeight = explicitWeights.length
+    ? explicitWeights.reduce((sum, weight) => sum + weight, 0) / explicitWeights.length
+    : 1 / children.length
+  const shareWeights = weights.map(weight => (
+    weight > 0 && weight < 0.95 ? weight : fallbackWeight
+  ))
+  const total = shareWeights.reduce((sum, weight) => sum + weight, 0)
+  return total > 0
+    ? shareWeights.map(weight => weight / total)
+    : children.map(() => 1 / children.length)
+}
+
+function assignCumulativeFlow(root) {
+  root.__flow = 1
+  root.__localShare = 1
+  root.eachBefore(node => {
+    if (!node.children?.length) return
+    const shares = childLocalShares(node.children)
+    node.children.forEach((child, index) => {
+      const localShare = shares[index] ?? (1 / node.children.length)
+      child.__localShare = localShare
+      child.__flow = (node.__flow ?? 1) * localShare
+    })
+  })
+}
+
 function linkStrokeWidth(d) {
-  const siblingWeights = d?.source?.data?.children?.map(child => child.weight)
-  return getLinkStrokeWidth(d?.target?.data?.weight, siblingWeights)
+  return getLinkStrokeWidth(d?.target?.__flow)
 }
 
 function applyLinkStrokeWidth(selection, extra = 0) {
@@ -70,6 +112,7 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
     const height = svgRef.current.clientHeight
 
     const root = d3.hierarchy(treeData, d => d.expanded === false ? null : d.children)
+    assignCumulativeFlow(root)
     const treeLayout = d3.tree()
       .nodeSize([NODE_V_GAP, NODE_H_GAP])
       .separation((a, b) => {
@@ -92,6 +135,8 @@ export default function TreeView({ treeData, density, onNodeSelect, onNodeToggle
       .join('path')
       .attr('class', 'link')
       .attr('data-target-id', d => d.target.data.id || '')
+      .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
+      .attr('data-local-share', d => Number.isFinite(d.target.__localShare) ? d.target.__localShare.toFixed(4) : '')
       .attr('stroke', d =>
         d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
       )

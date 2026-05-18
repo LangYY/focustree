@@ -81,7 +81,7 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 
 AI 在梳理全局时会输出权重草案，但不会立即写入。用户需要点击“应用权重方案”或明确确认后，才会归一化并写入 `nodes.weight`。
 
-视觉上，树枝线宽按同一父节点下的相对权重映射，而不是按单个节点的绝对数值映射。因此 40% / 40% / 20% 这类方案会在同级分支间形成可见粗细差异；默认未协商的 `1.0` 只表示普通默认值，不代表 100% 绝对优先级。
+视觉上，树枝线宽按从根节点流到当前节点的累计精力流量映射，而不是只看当前节点的局部权重。每一层分叉都会继续分流：`child_flow = parent_flow * local_share`。如果某个节点只有一个子节点，子节点继承父节点流量；只有出现多个子分支时，线条才继续变细。
 
 权重计算会同时结合 top-down 信号（目标、偏好、约束）和 bottom-up 信号（任务压力、阻塞、紧急性），但这只是内部计算依据。前端默认只展示最终精力配比，不把两端推导过程逐条展示给用户。
 
@@ -305,7 +305,7 @@ AI 输出：
 5. 按 `normalization_parent` 分组。
 6. 每组内部把 `suggested_share` 归一化到 100%。
 7. 调用 `updateWeight(node.id, normalizedWeight)` 写入 `nodes.weight`。
-8. 前端按同级相对权重刷新树枝线宽。
+8. 前端按逐级累计流量刷新树枝线宽。
 9. 当前消息标记为已应用，避免重复点击。
 
 ### 4.5 推荐闭环算法
@@ -371,7 +371,7 @@ FocusTree 采用四层记忆：
 
 - Supabase flat rows 先通过 `flatToTree` 转成树。
 - D3 `hierarchy` + `tree` 计算布局。
-- link 粗细由 `getLinkStrokeWidth(weight, siblingWeights)` 决定，按同级相对配比显示。
+- link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。
 - 节点颜色由 type 和 status 决定。
 
 交互：
