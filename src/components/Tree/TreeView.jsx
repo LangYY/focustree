@@ -72,6 +72,11 @@ function withDerivedWeightMeta(hNode) {
   }
 }
 
+function isTypingTarget(element) {
+  const tag = element?.tagName?.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || element?.isContentEditable
+}
+
 export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
@@ -85,6 +90,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const dragRef      = useRef({})  // { node, startX, startY, dragging, sourceEl, pointerId }
   const suppressClickRef = useRef(false)
   const addDisabledRef = useRef(false)
+  const addClickTimerRef = useRef(null)
   const onDropRef    = useRef(onDropBranch)
   const onLeafAddRef = useRef(onLeafAdd)
   const onRenameRef  = useRef(onRenameNode)
@@ -97,6 +103,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   useEffect(() => { onRenameRef.current = onRenameNode }, [onRenameNode])
   useEffect(() => { onNodeSelectRef.current = onNodeSelect }, [onNodeSelect])
   useEffect(() => { onNodeToggleRef.current = onNodeToggle }, [onNodeToggle])
+  useEffect(() => () => {
+    if (addClickTimerRef.current) window.clearTimeout(addClickTimerRef.current)
+  }, [])
 
   const startInlineRename = useCallback((hNode, event) => {
     const nodeData = hNode?.data || hNode
@@ -170,6 +179,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     onContextAction?.(action, payload)
   }, [onContextAction, startInlineRename])
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (isTypingTarget(event.target) || event.defaultPrevented) return
+      if (event.key !== 'F2' && event.key !== 'Enter') return
+      const selected = rootRef.current?.descendants().find(n => n.data.id === highlightedNodeId)
+      if (!selected || selected.data.type === 'root') return
+      event.preventDefault()
+      startInlineRename(selected, event)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [highlightedNodeId, startInlineRename])
+
   // 渲染树
   useEffect(() => {
     if (!treeData || !svgRef.current) return
@@ -234,6 +256,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     node.filter(d => d.data.type !== 'root')
       .on('dblclick', (event, d) => {
         event.stopPropagation()
+        if (addClickTimerRef.current) {
+          window.clearTimeout(addClickTimerRef.current)
+          addClickTimerRef.current = null
+        }
         onNodeToggleRef.current?.(d.data)
       })
 
@@ -302,7 +328,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         event.stopPropagation()
         if (suppressClickRef.current || addDisabledRef.current) return
         const childType = d.data.type === 'project' ? 'category' : 'task'
-        onLeafAddRef.current?.(d.data, childType)
+        if (addClickTimerRef.current) window.clearTimeout(addClickTimerRef.current)
+        addClickTimerRef.current = window.setTimeout(() => {
+          onLeafAddRef.current?.(d.data, childType)
+          addClickTimerRef.current = null
+        }, 180)
       })
 
     node.filter(d => d.data.type !== 'root')

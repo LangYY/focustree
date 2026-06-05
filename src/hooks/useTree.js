@@ -16,7 +16,8 @@ export function useTree(user) {
   const [loading, setLoading]       = useState(true)
   const [density, setDensity]       = useState('medium')
   const [leafView, setLeafView]     = useState(false)
-  const [history, setHistory]       = useState([])   // [{ label, undoFn }]
+  const [history, setHistory]       = useState([])   // [{ label, undoFn, redoFn }]
+  const [future, setFuture]         = useState([])   // redo stack
 
   // ── 加载 ────────────────────────────────────────────
 
@@ -64,8 +65,9 @@ export function useTree(user) {
 
   // ── 历史工具 ─────────────────────────────────────────
 
-  const pushHistory = useCallback((label, undoFn) => {
-    setHistory(prev => [...prev.slice(-(MAX_HISTORY - 1)), { label, undoFn }])
+  const pushHistory = useCallback((label, undoFn, redoFn) => {
+    setHistory(prev => [...prev.slice(-(MAX_HISTORY - 1)), { label, undoFn, redoFn }])
+    setFuture([])
   }, [])
 
   const undo = useCallback(async () => {
@@ -73,8 +75,21 @@ export function useTree(user) {
     const last = history[history.length - 1]
     setHistory(prev => prev.slice(0, -1))
     await last.undoFn()
+    if (last.redoFn) {
+      setFuture(prev => [...prev.slice(-(MAX_HISTORY - 1)), last])
+    }
     await loadNodes()
   }, [history, loadNodes])
+
+  const redo = useCallback(async () => {
+    if (!future.length) return
+    const next = future[future.length - 1]
+    if (!next.redoFn) return
+    setFuture(prev => prev.slice(0, -1))
+    await next.redoFn()
+    setHistory(prev => [...prev.slice(-(MAX_HISTORY - 1)), next])
+    await loadNodes()
+  }, [future, loadNodes])
 
   // ── 展开/折叠：内存先变，DB 异步 fire-and-forget ─────
   // 关键：必须持久化，否则任何后续 loadNodes()（CRUD 后都会触发）会重置回 DB 状态
@@ -119,11 +134,13 @@ export function useTree(user) {
     const node = findNodeById(treeData, nodeId)
     const prevStatus = node?.status || 'active'
     const prevCompleted = node?.completed_at || null
+    const nowIso = new Date().toISOString()
+    const nextCompleted = status === 'done' ? nowIso : null
 
     await supabase.from('nodes').update({
       status,
-      completed_at: status === 'done' ? new Date().toISOString() : null,
-      last_active_at: new Date().toISOString(),
+      completed_at: nextCompleted,
+      last_active_at: nowIso,
     }).eq('id', nodeId).eq('user_id', user.id)
 
     // 🔁 Outcome 闭环：标完成时，把对应的近期推荐回填为 completed
@@ -149,6 +166,11 @@ export function useTree(user) {
         status: prevStatus,
         completed_at: prevCompleted,
       }).eq('id', nodeId).eq('user_id', user.id)
+    }, async () => {
+      await supabase.from('nodes').update({
+        status,
+        completed_at: nextCompleted,
+      }).eq('id', nodeId).eq('user_id', user.id)
     })
 
     await loadNodes()
@@ -160,11 +182,15 @@ export function useTree(user) {
     if (!user || !newName?.trim()) return
     const node = findNodeById(treeData, nodeId)
     const prevName = node?.name || ''
+    const nextName = newName.trim()
+    if (!prevName || prevName === nextName) return
 
-    await supabase.from('nodes').update({ name: newName.trim() }).eq('id', nodeId).eq('user_id', user.id)
+    await supabase.from('nodes').update({ name: nextName }).eq('id', nodeId).eq('user_id', user.id)
 
-    pushHistory(`重命名「${prevName}」→「${newName}」`, async () => {
+    pushHistory(`重命名「${prevName}」→「${nextName}」`, async () => {
       await supabase.from('nodes').update({ name: prevName }).eq('id', nodeId).eq('user_id', user.id)
+    }, async () => {
+      await supabase.from('nodes').update({ name: nextName }).eq('id', nodeId).eq('user_id', user.id)
     })
 
     await loadNodes()
@@ -175,7 +201,7 @@ export function useTree(user) {
   const addNode = useCallback(async ({ name, type, parentId, color, annotations, weight }) => {
     if (!user) return
     const nodeWeight = typeof weight === 'number' ? Math.max(0, Math.min(2, weight)) : 1.0
-    const { data, error: insertErr } = await supabase.from('nodes').insert({
+    const insertPayload = {
       user_id: user.id,
       parent_id: parentId || null,
       name: name.trim(),
@@ -183,7 +209,8 @@ export function useTree(user) {
       status: 'active', weight: nodeWeight,
       expanded: true, position: Date.now(),
       last_active_at: new Date().toISOString(),
-    }).select('id').single()
+    }
+    const { data, error: insertErr } = await supabase.from('nodes').insert(insertPayload).select('id').single()
 
     if (insertErr) {
       console.error('[addNode] insert failed:', insertErr)
@@ -194,10 +221,12 @@ export function useTree(user) {
     let newId = null
     if (data?.id) {
       newId = data.id
+      const insertedNode = { ...insertPayload, id: newId }
+      let insertedAnnotation = null
 
       // 若 AI 提供了 annotations，写入 node_annotations
       if (annotations && Object.keys(annotations).length) {
-        const { error: annErr } = await supabase.from('node_annotations').insert({
+        insertedAnnotation = {
           node_id: newId,
           user_id: user.id,
           roi_type:      annotations.roi_type      || null,
@@ -207,12 +236,18 @@ export function useTree(user) {
           risk:          annotations.risk          || null,
           strategic_tag: annotations.strategic_tag || null,
           ai_notes:      annotations.ai_notes      || null,
-        })
+        }
+        const { error: annErr } = await supabase.from('node_annotations').insert(insertedAnnotation)
         if (annErr) console.warn('[addNode] annotations write:', annErr.message)
       }
 
       pushHistory(`添加「${name}」`, async () => {
         await supabase.from('nodes').delete().eq('id', newId).eq('user_id', user.id)
+      }, async () => {
+        await supabase.from('nodes').insert(insertedNode)
+        if (insertedAnnotation) {
+          await supabase.from('node_annotations').upsert(insertedAnnotation, { onConflict: 'node_id' })
+        }
       })
     }
 
@@ -257,6 +292,11 @@ export function useTree(user) {
     pushHistory(`删除「${nodeName}」`, async () => {
       const toInsert = sortByParentFirst(snapshot).map(stripRuntimeNodeFields)
       await supabase.from('nodes').insert(toInsert)
+    }, async () => {
+      for (const n of sorted) {
+        await supabase.from('nodes').delete()
+          .eq('id', n.id).eq('user_id', user.id)
+      }
     })
 
     await loadNodes()
@@ -308,6 +348,9 @@ export function useTree(user) {
     pushHistory(`移动「${node.name}」`, async () => {
       await supabase.from('nodes').update({ parent_id: prevParentId }).eq('id', nodeId).eq('user_id', user.id)
       setTreeData(prev => prev ? moveSubtreeInTree(prev, nodeId, prevParentId) : prev)
+    }, async () => {
+      await supabase.from('nodes').update({ parent_id: targetParentId }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? moveSubtreeInTree(prev, nodeId, targetParentId) : prev)
     })
   }, [user, treeData, pushHistory])
 
@@ -370,6 +413,14 @@ export function useTree(user) {
           .eq('id', item.id)
           .eq('user_id', user.id)
       ))
+    }, async () => {
+      await Promise.all(nextPositions.map(item =>
+        supabase
+          .from('nodes')
+          .update({ position: item.position })
+          .eq('id', item.id)
+          .eq('user_id', user.id)
+      ))
     })
   }, [user, treeData, pushHistory])
 
@@ -395,6 +446,12 @@ export function useTree(user) {
       const toInsert = sortByParentFirst(allNodes).map(stripRuntimeNodeFields)
       const { error } = await supabase.from('nodes').insert(toInsert)
       if (error) console.error('[clearAll] undo:', error.message)
+    }, async () => {
+      const redoSorted = sortByDepthDesc(allNodes)
+      for (const n of redoSorted) {
+        await supabase.from('nodes').delete()
+          .eq('id', n.id).eq('user_id', user.id)
+      }
     })
 
     await loadNodes()
@@ -426,6 +483,9 @@ export function useTree(user) {
     pushHistory(`调整「${node?.name}」权重`, async () => {
       await supabase.from('nodes').update({ weight: prevWeight }).eq('id', nodeId).eq('user_id', user.id)
       setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, prevWeight) : prev)
+    }, async () => {
+      await supabase.from('nodes').update({ weight: nextWeight }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, nextWeight) : prev)
     })
 
     await loadNodes()
@@ -439,9 +499,13 @@ export function useTree(user) {
     reload: loadNodes,
     // 历史
     history,
+    future,
     canUndo: history.length > 0,
+    canRedo: future.length > 0,
     lastAction: history[history.length - 1]?.label || null,
+    nextAction: future[future.length - 1]?.label || null,
     undo,
+    redo,
   }
 }
 

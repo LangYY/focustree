@@ -7,11 +7,12 @@ export default function Toolbar({
   leafView, onToggleLeafView,
   onResetZoom,
   user, onSignOut,
-  canUndo, lastAction, onUndo,
-  history,
+  canUndo, canRedo, lastAction, nextAction, onUndo, onRedo,
+  history, future,
   onOpenBackup, backupWarning,
 }) {
   const [showHistory, setShowHistory] = useState(false)
+  const [showFuture, setShowFuture] = useState(false)
 
   return (
     <div
@@ -86,6 +87,38 @@ export default function Toolbar({
           )}
         </div>
 
+        {/* 前进按钮 */}
+        <div className="relative">
+          <button
+            onClick={canRedo ? onRedo : undefined}
+            onContextMenu={e => { e.preventDefault(); if (future?.length) setShowFuture(v => !v) }}
+            disabled={!canRedo}
+            title={canRedo ? `前进：${nextAction}（右键查看可前进操作）` : '没有可前进的操作'}
+            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border transition-colors ${
+              canRedo
+                ? 'border-gray-600 text-gray-300 hover:bg-gray-800 cursor-pointer'
+                : 'border-gray-800 text-gray-600 cursor-not-allowed'
+            }`}
+          >
+            <span>↪</span>
+            {canRedo && nextAction && (
+              <span className="max-w-28 truncate">{nextAction}</span>
+            )}
+            {!canRedo && <span>前进</span>}
+          </button>
+
+          {showFuture && future?.length > 0 && (
+            <HistoryPanel
+              history={future}
+              title="可前进"
+              countLabel={`${future.length} 步可前进`}
+              actionLabel="前进"
+              onClose={() => setShowFuture(false)}
+              onUndo={() => { onRedo(); setShowFuture(false) }}
+            />
+          )}
+        </div>
+
         <div className="w-px h-4 bg-gray-700" />
 
         {/* 数据备份/恢复 */}
@@ -133,15 +166,15 @@ export default function Toolbar({
 
 // ── 历史记录面板 ─────────────────────────────────────
 
-function HistoryPanel({ history, onClose, onUndo }) {
+function HistoryPanel({ history, onClose, onUndo, title = '操作历史', countLabel, actionLabel = '撤销' }) {
   // 点击外部关闭
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div className="absolute right-0 top-full mt-1 z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-64 py-2">
         <div className="px-3 pb-2 border-b border-gray-800 flex items-center justify-between">
-          <span className="text-xs font-semibold text-gray-400">操作历史</span>
-          <span className="text-xs text-gray-600">{history.length} 步可撤销</span>
+          <span className="text-xs font-semibold text-gray-400">{title}</span>
+          <span className="text-xs text-gray-600">{countLabel || `${history.length} 步可撤销`}</span>
         </div>
         <div className="max-h-60 overflow-y-auto">
           {[...history].reverse().map((entry, i) => (
@@ -158,7 +191,7 @@ function HistoryPanel({ history, onClose, onUndo }) {
                   onClick={onUndo}
                   className="ml-auto text-blue-400 hover:text-blue-300 flex-shrink-0"
                 >
-                  撤销
+                  {actionLabel}
                 </button>
               )}
             </div>

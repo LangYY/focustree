@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
 /**
  * 对话历史面板
@@ -46,7 +46,7 @@ export default function ChatHistoryPanel({
           <div>
             <div className="text-base font-semibold text-gray-200">对话历史</div>
             <div className="text-[11px] text-gray-500 mt-0.5">
-              一段没说话超过 30 分钟就开新对话。共 {sessions.length} 段
+              只有主动点击“新对话”时才会开启新段。共 {sessions.length} 段
             </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">关闭 [x]</button>

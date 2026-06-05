@@ -28,9 +28,9 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
     zIndex: 1000,
   }
 
-  const canHaveChildren = node.type === 'project' || node.type === 'category'
   const childType = node.type === 'project' ? 'category' : 'task'
   const childLabel = node.type === 'project' ? '分类' : '任务'
+  const siblingLabel = node.type === 'project' ? '项目' : node.type === 'category' ? '分类' : '任务'
 
   const nextStatus = node.status === 'done' ? 'active'
     : node.status === 'active' ? 'done' : 'active'
@@ -54,14 +54,17 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
       </div>
 
       <div className="py-1">
-        {/* 添加子节点 */}
-        {canHaveChildren && (
-          <MenuItem
-            icon="＋"
-            label={`添加${childLabel}`}
-            onClick={() => { onAction('add-child', { node, childType }); onClose() }}
-          />
-        )}
+        {/* 添加节点 */}
+        <MenuItem
+          icon="＋"
+          label={`添加子${childLabel}`}
+          onClick={() => { onAction('add-child', { node, childType }); onClose() }}
+        />
+        <MenuItem
+          icon="＋"
+          label={`添加同级${siblingLabel}`}
+          onClick={() => { onAction('add-sibling', { node, childType: node.type }); onClose() }}
+        />
 
         {/* 重命名 */}
         <MenuItem

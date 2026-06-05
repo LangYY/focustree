@@ -10,8 +10,8 @@ const WELCOME = {
   content: '你好，我是你的专注树助理。说说现在想做什么？',
 }
 
-// Session 划分阈值：超过这个间隔没说话，开新 session
-const SESSION_GAP_MS = 30 * 60 * 1000  // 30 分钟
+const SESSION_LOAD_LIMIT = 200
+const AGENT_HISTORY_MESSAGE_LIMIT = 14
 
 /**
  * 浏览器内生成 UUIDv4
@@ -28,9 +28,9 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   const [messages, setMessages] = useState([WELCOME])
   const [isLoading, setIsLoading] = useState(false)
 
-  // 当前 session：组件挂载时确定，gap 检测后可能换新
+  // 当前 session：组件挂载时恢复最近一段；只在用户主动新开对话时更换
   const [sessionId, setSessionId] = useState(null)
-  // 用 ref 存最近一条消息时间，方便 sendMessage 里同步判断 gap
+  // 用 ref 存最近一条消息时间，仅做状态记录，不自动切 session
   const lastMsgTimeRef = useRef(0)
   // 保存最后一条用户消息，失败后可重试
   const lastUserMessageRef = useRef('')
@@ -98,7 +98,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       .eq('user_id', user.id)
       .eq('session_id', activeSession)
       .order('created_at', { ascending: true })
-      .limit(50)
+      .limit(SESSION_LOAD_LIMIT)
 
     if (gen !== initGenRef.current) return
     if (err2) {
@@ -313,15 +313,10 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       return
     }
 
-    // gap 检测：如果距上次消息 > 阈值，开新 session，并触发对旧 session 的摘要
-    let activeSession = sessionId
+    let activeSession = sessionId || uuid()
     const now = Date.now()
-    if (lastMsgTimeRef.current && now - lastMsgTimeRef.current > SESSION_GAP_MS) {
-      const oldSession = activeSession
-      activeSession = uuid()
+    if (!sessionId) {
       setSessionId(activeSession)
-      setMessages([WELCOME])  // 视觉上清空，但 DB 里的旧 session 保留
-      if (oldSession) fireSummarize(oldSession)
     }
     lastMsgTimeRef.current = now
 
@@ -477,7 +472,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       // 当前 session 内的近期对话（服务端会做 sanitize，这里只传原始消息）
       const history = messages
         .filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
-        .slice(-10)
+        .slice(-AGENT_HISTORY_MESSAGE_LIMIT)
 
       const agentStartedAt = performance.now()
       const result = await callAgent({
@@ -707,8 +702,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   }, [messages, treeActions, user, sessionId])
 
   /**
-   * 清空当前 session 的对话（DB 中保留旧 session 历史，可在历史面板查阅）
-   * 同时开一个新 session
+   * 用户主动新开对话。
+   * DB 中保留旧 session 历史，可在历史面板查阅；旧 session 会异步摘要。
    */
   const resetConversation = useCallback(async () => {
     if (!user) { setMessages([WELCOME]); return }

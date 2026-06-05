@@ -77,7 +77,7 @@ export default function App() {
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
     addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateWeight, moveNode, reorderNode,
-    history, canUndo, lastAction, undo,
+    history, future, canUndo, canRedo, lastAction, nextAction, undo, redo,
   } = useTree(user)
 
   // 用户画像（当前阶段目标等）
@@ -106,7 +106,7 @@ export default function App() {
         }
         if (n.children) queue.push(...n.children)
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     if (isLarge) {
       try {
         await backupRef.current?.preDestructiveBackup?.('删除子树前')
@@ -143,6 +143,14 @@ export default function App() {
     // 恢复完成后强制刷新整棵树
     window.location.reload()
   })
+  const [backupNow, setBackupNow] = useState(0)
+  useEffect(() => {
+    const refresh = () => setBackupNow(Date.now())
+    refresh()
+    const timer = window.setInterval(refresh, 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const backupWarning = !backup.lastManual || !backupNow || (backupNow - backup.lastManual) > 7 * 24 * 3600 * 1000
   // 把 backup 暴露给上面 guardedClearAll/guardedDeleteNode 用的 ref
   useEffect(() => { backupRef.current = backup }, [backup])
 
@@ -152,6 +160,10 @@ export default function App() {
 
     if (action === 'add-child') {
       setModal({ parentNode: node, defaultType: childType })
+    }
+    if (action === 'add-sibling') {
+      const parentNode = node.parent_id ? findNodeInTree(treeData, node.parent_id) : null
+      setModal({ parentNode, defaultType: node.type === 'project' ? 'project' : (childType || node.type || 'task') })
     }
     if (action === 'rename') return
     if (action === 'status') {
@@ -185,7 +197,7 @@ export default function App() {
         await guardedDeleteNode(node.id)
       }
     }
-  }, [updateStatus, guardedDeleteNode, updateWeight])
+  }, [updateStatus, guardedDeleteNode, updateWeight, treeData])
 
   // ── 新建节点 ────────────────────────────────────────
   const handleAddNode = useCallback(async ({ name, type, color, parentId }) => {
@@ -232,11 +244,15 @@ export default function App() {
         user={user}
         onSignOut={handleSignOut}
         canUndo={canUndo}
+        canRedo={canRedo}
         lastAction={lastAction}
+        nextAction={nextAction}
         onUndo={undo}
+        onRedo={redo}
         history={history}
+        future={future}
         onOpenBackup={() => setBackupOpen(true)}
-        backupWarning={!backup.lastManual || (Date.now() - backup.lastManual) > 7 * 24 * 3600 * 1000}
+        backupWarning={backupWarning}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -378,4 +394,14 @@ export default function App() {
       )}
     </div>
   )
+}
+
+function findNodeInTree(tree, id) {
+  if (!tree || !id) return null
+  if (tree.id === id) return tree
+  for (const child of tree.children || []) {
+    const found = findNodeInTree(child, id)
+    if (found) return found
+  }
+  return null
 }

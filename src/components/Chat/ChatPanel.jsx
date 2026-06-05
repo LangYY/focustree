@@ -432,7 +432,7 @@ export default function ChatPanel({
       return true
     }
 
-    // /新对话 或 /重置 或 /reset → 开新 session（旧对话保留在历史里）
+    // /新对话 或 /重置 或 /reset → 用户主动开新 session（旧对话保留在历史里）
     if (/^\/(?:新对话|重置|reset|清除对话|清空对话)\s*$/i.test(text)) {
       onResetConversation?.()
       return true
