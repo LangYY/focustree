@@ -311,6 +311,68 @@ export function useTree(user) {
     })
   }, [user, treeData, pushHistory])
 
+  // ── 调整同级节点顺序 ─────────────────────────────────
+
+  const reorderNode = useCallback(async (nodeId, targetSiblingId, placement = 'after') => {
+    if (!user || !nodeId || !targetSiblingId || nodeId === targetSiblingId) return
+
+    const node = findNodeById(treeData, nodeId)
+    const target = findNodeById(treeData, targetSiblingId)
+    if (!node || !target) return
+
+    const parentId = node.parent_id || null
+    if ((target.parent_id || null) !== parentId) return
+
+    const siblings = getSiblingNodes(treeData, parentId)
+    if (!siblings.some(s => s.id === nodeId) || !siblings.some(s => s.id === targetSiblingId)) return
+
+    const prevOrder = siblings.map(s => ({ id: s.id, position: s.position ?? 0 }))
+    const nextIds = reorderSiblingIds(siblings.map(s => s.id), nodeId, targetSiblingId, placement)
+    const prevIds = prevOrder.map(s => s.id)
+    if (nextIds.join('|') === prevIds.join('|')) return
+
+    const nextPositions = nextIds.map((id, index) => ({
+      id,
+      position: (index + 1) * 1000,
+    }))
+
+    setTreeData(prev => prev ? reorderSiblingsInTree(prev, parentId, nextPositions) : prev)
+
+    const updates = nextPositions.map(item =>
+      supabase
+        .from('nodes')
+        .update({ position: item.position })
+        .eq('id', item.id)
+        .eq('user_id', user.id)
+    )
+    const results = await Promise.all(updates)
+    const firstError = results.find(result => result.error)?.error
+
+    if (firstError) {
+      console.error('[reorderNode]', firstError.message)
+      alert(`调整顺序失败：${firstError.message}`)
+      setTreeData(prev => prev ? reorderSiblingsInTree(prev, parentId, prevOrder) : prev)
+      await Promise.all(prevOrder.map(item =>
+        supabase
+          .from('nodes')
+          .update({ position: item.position })
+          .eq('id', item.id)
+          .eq('user_id', user.id)
+      ))
+      return
+    }
+
+    pushHistory(`调整「${node.name}」顺序`, async () => {
+      await Promise.all(prevOrder.map(item =>
+        supabase
+          .from('nodes')
+          .update({ position: item.position })
+          .eq('id', item.id)
+          .eq('user_id', user.id)
+      ))
+    })
+  }, [user, treeData, pushHistory])
+
   // ── 清空所有（clear_all）─────────────────────────────
 
   const clearAll = useCallback(async () => {
@@ -372,7 +434,7 @@ export function useTree(user) {
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight, moveNode,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight, moveNode, reorderNode,
     annotateNode,
     reload: loadNodes,
     // 历史
@@ -422,7 +484,6 @@ function moveSubtreeInTree(tree, nodeId, targetParentId) {
 
   function paste(node) {
     if (!extracted) return node
-    const newParentId = targetParentId ?? 'root'
     const isTarget = (targetParentId == null && node.id === 'root') || node.id === targetParentId
     if (isTarget) {
       const updatedChild = { ...extracted, parent_id: targetParentId ?? null }
@@ -437,6 +498,61 @@ function moveSubtreeInTree(tree, nodeId, targetParentId) {
   const cutTree = cut(tree)
   if (!extracted) return tree
   return paste(cutTree)
+}
+
+function getSiblingNodes(tree, parentId) {
+  if (!tree) return []
+  const targetParentId = parentId ?? 'root'
+
+  function walk(node) {
+    const isTarget = (parentId == null && node.id === 'root') || node.id === targetParentId
+    if (isTarget) return node.children || []
+    for (const child of node.children || []) {
+      const found = walk(child)
+      if (found) return found
+    }
+    return null
+  }
+
+  return walk(tree) || []
+}
+
+function reorderSiblingIds(ids, nodeId, targetSiblingId, placement) {
+  const withoutSource = ids.filter(id => id !== nodeId)
+  const targetIndex = withoutSource.indexOf(targetSiblingId)
+  if (targetIndex < 0) return ids
+  const insertIndex = placement === 'before' ? targetIndex : targetIndex + 1
+  const next = [...withoutSource]
+  next.splice(insertIndex, 0, nodeId)
+  return next
+}
+
+function reorderSiblingsInTree(tree, parentId, orderedPositions) {
+  const positionById = new Map(orderedPositions.map(item => [item.id, item.position]))
+  const orderById = new Map(orderedPositions.map((item, index) => [item.id, index]))
+  const targetParentId = parentId ?? 'root'
+
+  function walk(node) {
+    const isTarget = (parentId == null && node.id === 'root') || node.id === targetParentId
+    if (isTarget) {
+      const children = [...(node.children || [])]
+        .map(child => positionById.has(child.id)
+          ? { ...child, position: positionById.get(child.id) }
+          : child
+        )
+        .sort((a, b) => {
+          const aOrder = orderById.has(a.id) ? orderById.get(a.id) : Number.MAX_SAFE_INTEGER
+          const bOrder = orderById.has(b.id) ? orderById.get(b.id) : Number.MAX_SAFE_INTEGER
+          if (aOrder !== bOrder) return aOrder - bOrder
+          return (a.position ?? 0) - (b.position ?? 0)
+        })
+      return { ...node, children }
+    }
+    if (!node.children?.length) return node
+    return { ...node, children: node.children.map(walk) }
+  }
+
+  return walk(tree)
 }
 
 // ── 新用户示例数据 ────────────────────────────────────

@@ -76,7 +76,7 @@ export default function App() {
     density, setDensity,
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateWeight, moveNode,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateWeight, moveNode, reorderNode,
     history, canUndo, lastAction, undo,
   } = useTree(user)
 
@@ -153,12 +153,7 @@ export default function App() {
     if (action === 'add-child') {
       setModal({ parentNode: node, defaultType: childType })
     }
-    if (action === 'rename') {
-      const newName = prompt(`重命名「${node.name}」：`, node.name)
-      if (newName && newName.trim() !== node.name) {
-        await renameNode(node.id, newName)
-      }
-    }
+    if (action === 'rename') return
     if (action === 'status') {
       await updateStatus(node.id, status)
     }
@@ -190,7 +185,7 @@ export default function App() {
         await guardedDeleteNode(node.id)
       }
     }
-  }, [renameNode, updateStatus, deleteNode, updateWeight])
+  }, [updateStatus, guardedDeleteNode, updateWeight])
 
   // ── 新建节点 ────────────────────────────────────────
   const handleAddNode = useCallback(async ({ name, type, color, parentId }) => {
@@ -198,9 +193,13 @@ export default function App() {
   }, [addNode])
 
   // ── 拖拽分支 ────────────────────────────────────────
-  const handleDropBranch = useCallback(async (source, target) => {
+  const handleDropBranch = useCallback(async (source, target, drop) => {
+    if (drop?.mode === 'reorder') {
+      await reorderNode(source.id, target.id, drop.placement)
+      return
+    }
     await moveNode(source.id, target.id)
-  }, [moveNode])
+  }, [moveNode, reorderNode])
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -288,6 +287,7 @@ export default function App() {
                 highlightedNodeId={highlightedNodeId}
                 onLeafAdd={(node, childType) => setModal({ parentNode: node, defaultType: childType })}
                 onDropBranch={handleDropBranch}
+                onRenameNode={renameNode}
               />
             </>
           )}

@@ -72,21 +72,83 @@ function withDerivedWeightMeta(hNode) {
   }
 }
 
-export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch }) {
+export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
   const zoomRef = useRef(null)
   const rootRef = useRef(null)   // 缓存 d3 hierarchy root，供高亮 effect 使用
+  const treeDataRef = useRef(treeData)
 
   const [contextMenu, setContextMenu] = useState(null)  // { x, y, node }
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
+  const [editingNode, setEditingNode] = useState(null)  // { id, name, left, top, width }
   const dragRef      = useRef({})  // { node, startX, startY, dragging, sourceEl, pointerId }
   const suppressClickRef = useRef(false)
   const addDisabledRef = useRef(false)
   const onDropRef    = useRef(onDropBranch)
   const onLeafAddRef = useRef(onLeafAdd)
+  const onRenameRef  = useRef(onRenameNode)
+  const onNodeSelectRef = useRef(onNodeSelect)
+  const onNodeToggleRef = useRef(onNodeToggle)
+  const renameCancelledRef = useRef(false)
+  useEffect(() => { treeDataRef.current = treeData }, [treeData])
   useEffect(() => { onDropRef.current = onDropBranch }, [onDropBranch])
   useEffect(() => { onLeafAddRef.current = onLeafAdd }, [onLeafAdd])
+  useEffect(() => { onRenameRef.current = onRenameNode }, [onRenameNode])
+  useEffect(() => { onNodeSelectRef.current = onNodeSelect }, [onNodeSelect])
+  useEffect(() => { onNodeToggleRef.current = onNodeToggle }, [onNodeToggle])
+
+  const startInlineRename = useCallback((hNode, event) => {
+    const nodeData = hNode?.data || hNode
+    if (!nodeData?.id || nodeData.type === 'root') return
+
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    setContextMenu(null)
+    setTooltip(null)
+    renameCancelledRef.current = false
+
+    const nodeEl = gRef.current?.querySelector(`.node[data-node-id="${nodeData.id}"]`)
+    const labelEl = nodeEl?.querySelector?.('.node-label')
+    const rect = labelEl?.getBoundingClientRect?.() || nodeEl?.getBoundingClientRect?.()
+    const radius = getNodeRadius(nodeData.type)
+    const left = rect
+      ? (labelEl ? rect.left - 4 : rect.left + radius + 8)
+      : (event?.clientX || 80)
+    const top = rect
+      ? rect.top + rect.height / 2 - 16
+      : (event?.clientY || 80) - 16
+    const width = Math.max(160, Math.min(380, String(nodeData.name || '').length * 15 + 48))
+
+    setEditingNode({
+      id: nodeData.id,
+      name: nodeData.name || '',
+      left: Math.max(8, Math.min(left, window.innerWidth - width - 12)),
+      top: Math.max(8, Math.min(top, window.innerHeight - 44)),
+      width,
+    })
+  }, [])
+
+  const commitInlineRename = useCallback(async () => {
+    const current = editingNode
+    if (!current) return
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false
+      setEditingNode(null)
+      return
+    }
+    const nextName = current.name.trim()
+    setEditingNode(null)
+    if (!nextName) return
+    const node = rootRef.current?.descendants().find(n => n.data.id === current.id)?.data
+    if (node && nextName === node.name) return
+    await onRenameRef.current?.(current.id, nextName)
+  }, [editingNode])
+
+  const cancelInlineRename = useCallback(() => {
+    renameCancelledRef.current = true
+    setEditingNode(null)
+  }, [])
 
   // 暴露 resetZoom 给父组件
   const resetZoom = useCallback(() => {
@@ -98,6 +160,15 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   useEffect(() => {
     if (resetZoomRef) resetZoomRef.current = resetZoom
   }, [resetZoom, resetZoomRef])
+
+  const handleContextMenuAction = useCallback((action, payload) => {
+    if (action === 'rename') {
+      const hNode = rootRef.current?.descendants().find(n => n.data.id === payload?.node?.id)
+      startInlineRename(hNode || payload?.node)
+      return
+    }
+    onContextAction?.(action, payload)
+  }, [onContextAction, startInlineRename])
 
   // 渲染树
   useEffect(() => {
@@ -156,14 +227,14 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .on('click', (event, d) => {
         event.stopPropagation()
         setContextMenu(null)
-        onNodeSelect?.(withDerivedWeightMeta(d))
+        onNodeSelectRef.current?.(withDerivedWeightMeta(d))
       })
 
     // 双击：折叠/展开
     node.filter(d => d.data.type !== 'root')
       .on('dblclick', (event, d) => {
         event.stopPropagation()
-        onNodeToggle?.(d.data)
+        onNodeToggleRef.current?.(d.data)
       })
 
     // 右键：上下文菜单
@@ -267,12 +338,22 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     node.filter(d => showLabel(d))
       .append('text')
+      .attr('class', 'node-label')
       .attr('x', d => getNodeRadius(d.data.type) + 6)
       .attr('dy', '0.35em')
       .attr('fill', '#d1d5db')
       .attr('font-size', d => d.data.type === 'project' ? 13 : 11)
       .attr('font-weight', d => d.data.type === 'project' ? 600 : 400)
-      .attr('pointer-events', 'none')
+      .attr('pointer-events', 'auto')
+      .style('cursor', 'text')
+      .on('click', (event, d) => {
+        event.stopPropagation()
+        setContextMenu(null)
+        onNodeSelectRef.current?.(withDerivedWeightMeta(d))
+      })
+      .on('dblclick', (event, d) => {
+        startInlineRename(d, event)
+      })
       .text(d => d.data.name)
 
     // 居中定位
@@ -285,7 +366,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const offsetY = (height - treeH) / 2 - minY + 30
     g.attr('transform', `translate(${offsetX},${offsetY})`)
 
-  }, [treeData, userGoal, density])
+  }, [treeData, userGoal, density, startInlineRename])
 
   // ── 高亮：监听 highlightedNodeId 变化，更新节点圆圈 + 祖先路径 ──
   useEffect(() => {
@@ -372,9 +453,31 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const svgEl = svgRef.current
     if (!svgEl) return
 
-    const findBranchDropTarget = (clientX, clientY, sourceId, sourceEl) => {
+    const getDropOperation = (clientX, clientY, sourceNode, targetNode) => {
+      const sourceParentId = sourceNode?.data?.parent_id || null
+      const targetParentId = targetNode?.data?.parent_id || null
+      if (sourceParentId === targetParentId) {
+        const [, pointerY] = d3.pointer({ clientX, clientY }, gRef.current)
+        return {
+          mode: 'reorder',
+          placement: pointerY <= targetNode.x ? 'before' : 'after',
+        }
+      }
+      return { mode: 'move', placement: null }
+    }
+
+    const buildDropTarget = (clientX, clientY, sourceNode, targetNode, el, distance) => ({
+      node: targetNode,
+      el,
+      distance,
+      ...getDropOperation(clientX, clientY, sourceNode, targetNode),
+    })
+
+    const findBranchDropTarget = (clientX, clientY, sourceNode, sourceEl) => {
       const root = rootRef.current
       if (!root) return null
+      const sourceId = sourceNode?.data?.id
+      if (!sourceId) return null
 
       // DOM 命中优先；临时忽略源节点，避免拖回原位或三指拖曳残留命中自己。
       const previousPointerEvents = sourceEl?.style.pointerEvents
@@ -387,7 +490,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
           const targetNode = root.descendants().find(n => n.data.id === targetId)
           if (targetNode && targetNode.data.type !== 'root') {
-            return { node: targetNode, el: nodeEl }
+            return buildDropTarget(clientX, clientY, sourceNode, targetNode, nodeEl)
           }
         }
       } finally {
@@ -415,11 +518,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
         if ((onCircle || onLabelRow) && (!best || distance < best.distance)) {
           const el = gRef.current.querySelector(`.node[data-node-id="${candidate.data.id}"]`)
-          best = { node: candidate, el, distance }
+          best = buildDropTarget(clientX, clientY, sourceNode, candidate, el, distance)
         }
       }
 
-      return best ? { node: best.node, el: best.el } : null
+      return best || null
     }
 
     const restoreDragStyles = ({ sourceEl, previousBodyUserSelect }) => {
@@ -495,7 +598,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         .attr('pointer-events', 'none')
 
       // 统计这个分支带几个子孙——计数用 treeData（含折叠的），不是 D3 hierarchy（不含折叠）
-      const fullNode = findNodeById(treeData, nodeId)
+      const fullNode = findNodeById(treeDataRef.current, nodeId)
       const descendantCount = countDescendants(fullNode)
       const previewBadge = d3.select(gRef.current)
         .append('g')
@@ -586,15 +689,25 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           d3.select(dragRef.current.sourceEl).attr('opacity', 0.65)
         }
 
+        const drop = dragRef.current.dragging
+          ? findBranchDropTarget(e.clientX, e.clientY, dragRef.current.node, dragRef.current.sourceEl)
+          : null
+
         // 更新预览徽章：跟着鼠标走，显示「正在拖动 <节点名>（+N 子）」
         if (dragRef.current.dragging && dragRef.current.previewBadge) {
           const count = dragRef.current.descendantCount || 0
           const sourceName = dragRef.current.node?.data?.name || '节点'
           const truncated = sourceName.length > 12 ? sourceName.slice(0, 12) + '…' : sourceName
-          const label = count > 0 ? `${truncated} +${count}子` : truncated
+          let label = count > 0 ? `${truncated} +${count}子` : truncated
+          if (drop?.node?.data?.name) {
+            const targetName = drop.node.data.name.length > 10 ? drop.node.data.name.slice(0, 10) + '…' : drop.node.data.name
+            label = drop.mode === 'reorder'
+              ? `${drop.placement === 'before' ? '排到前面' : '排到后面'}：${targetName}`
+              : `移入：${targetName}`
+          }
           const badge = dragRef.current.previewBadge
           const text = badge.select('.drag-preview-badge-text').text(label)
-          const padX = 8, padY = 4
+          const padX = 8
           // 中文宽度大概 14px，英文 7px，简单粗估
           const w = Math.max(70, label.length * 12 + padX * 2)
           const h = 20
@@ -607,17 +720,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         }
 
         // 实时高亮当前 hover 的潜在 drop target
-        const drop = findBranchDropTarget(e.clientX, e.clientY, dragRef.current.node.data.id, dragRef.current.sourceEl)
-        if (drop?.el !== dragRef.current.hoverEl) {
+        if (drop?.el !== dragRef.current.hoverEl || drop?.mode !== dragRef.current.hoverMode || drop?.placement !== dragRef.current.hoverPlacement) {
           if (dragRef.current.hoverEl) {
             d3.select(dragRef.current.hoverEl).select('.node-main-circle')
               .attr('stroke', '#1f2937').attr('stroke-width', 1.5)
           }
           if (drop?.el) {
             d3.select(drop.el).select('.node-main-circle')
-              .attr('stroke', '#34d399').attr('stroke-width', 3)
+              .attr('stroke', drop.mode === 'reorder' ? '#f59e0b' : '#34d399')
+              .attr('stroke-width', 3)
           }
           dragRef.current.hoverEl = drop?.el || null
+          dragRef.current.hoverMode = drop?.mode || null
+          dragRef.current.hoverPlacement = drop?.placement || null
         }
       }
 
@@ -653,9 +768,12 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         suppressPostDragClick()
         scheduleEnableAdd()
 
-        const drop = findBranchDropTarget(endX, endY, node.data.id, sourceEl)
+        const drop = findBranchDropTarget(endX, endY, node, sourceEl)
         if (drop?.node) {
-          onDropRef.current?.(node.data, drop.node.data)
+          onDropRef.current?.(node.data, drop.node.data, {
+            mode: drop.mode,
+            placement: drop.placement,
+          })
         }
       }
 
@@ -730,6 +848,32 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         <g ref={gRef} />
       </svg>
 
+      {editingNode && (
+        <input
+          autoFocus
+          value={editingNode.name}
+          onFocus={event => event.target.select()}
+          onChange={event => setEditingNode(prev => prev ? { ...prev, name: event.target.value } : prev)}
+          onBlur={commitInlineRename}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commitInlineRename()
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              cancelInlineRename()
+            }
+          }}
+          className="fixed z-[1100] rounded-md border border-blue-500 bg-gray-950 px-2 py-1 text-sm text-gray-100 shadow-xl outline-none"
+          style={{
+            left: editingNode.left,
+            top: editingNode.top,
+            width: editingNode.width,
+          }}
+        />
+      )}
+
       {/* 右键菜单 */}
       {contextMenu && (
         <ContextMenu
@@ -737,7 +881,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           y={contextMenu.y}
           node={contextMenu.node}
           onClose={() => setContextMenu(null)}
-          onAction={onContextAction}
+          onAction={handleContextMenuAction}
         />
       )}
 

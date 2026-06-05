@@ -1,11 +1,16 @@
 import express from 'express'
 import cors from 'cors'
 import { createClient } from '@supabase/supabase-js'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { runAgent } from './agent.js'
 import { summarizeSession } from './summarizer.js'
 import { generateDailyFocus } from './dailyFocus.js'
 import { generateWeeklyReview } from './weeklyReview.js'
 import { postChatCompletion } from './llmClient.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const DIST_DIR = path.resolve(__dirname, '../dist')
 
 const app = express()
 app.use(cors())
@@ -15,6 +20,18 @@ const LLM_PROVIDER = process.env.LLM_PROVIDER === 'openai' ? 'openai' : 'deepsee
 const API_KEY  = LLM_PROVIDER === 'openai' ? process.env.OPENAI_API_KEY : process.env.DEEPSEEK_API_KEY
 const SUPA_URL = process.env.SUPABASE_URL
 const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const PUBLIC_SUPA_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
+const PUBLIC_SUPA_KEY = process.env.VITE_SUPABASE_ANON_KEY || ''
+const REQUIRED_TABLES = [
+  'nodes',
+  'node_annotations',
+  'conversations',
+  'session_summaries',
+  'user_profile',
+  'recommendation_log',
+  'daily_focus',
+  'weekly_reviews',
+]
 
 if (!API_KEY)  console.error(`❌ ${LLM_PROVIDER === 'openai' ? 'OPENAI_API_KEY' : 'DEEPSEEK_API_KEY'} not set`)
 if (!SUPA_URL) console.warn('⚠️ SUPABASE_URL not set — summarizer disabled')
@@ -23,6 +40,60 @@ console.log(`[llm] provider=${LLM_PROVIDER}`)
 
 // 服务端 supabase client（bypass RLS，用 service role）
 const supa = (SUPA_URL && SUPA_KEY) ? createClient(SUPA_URL, SUPA_KEY) : null
+
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    provider: LLM_PROVIDER,
+    llm_configured: Boolean(API_KEY),
+    public_supabase_configured: Boolean(PUBLIC_SUPA_URL && PUBLIC_SUPA_KEY),
+    service_supabase_configured: Boolean(supa),
+    supabase_configured: Boolean(PUBLIC_SUPA_URL && PUBLIC_SUPA_KEY && supa),
+  })
+})
+
+app.get('/readiness', async (req, res) => {
+  const env = {
+    llm_configured: Boolean(API_KEY),
+    public_supabase_configured: Boolean(PUBLIC_SUPA_URL && PUBLIC_SUPA_KEY),
+    service_supabase_configured: Boolean(supa),
+  }
+  const tables = {}
+  const result = {
+    ok: false,
+    env,
+    database: {
+      checked: false,
+      ok: false,
+      tables,
+    },
+  }
+
+  if (supa) {
+    result.database.checked = true
+    await Promise.all(REQUIRED_TABLES.map(async (table) => {
+      const { error } = await supa
+        .from(table)
+        .select('user_id', { head: true, count: 'exact' })
+        .limit(1)
+      tables[table] = error ? { ok: false, message: error.message } : { ok: true }
+    }))
+    result.database.ok = Object.values(tables).every(item => item.ok)
+  }
+
+  result.ok = Object.values(env).every(Boolean) && result.database.ok
+  res.status(result.ok ? 200 : 503).json(result)
+})
+
+app.get('/runtime-config.js', (req, res) => {
+  res
+    .type('application/javascript')
+    .set('Cache-Control', 'no-store')
+    .send(`window.__FOCUSTREE_CONFIG__=${JSON.stringify({
+      supabaseUrl: PUBLIC_SUPA_URL,
+      supabaseAnonKey: PUBLIC_SUPA_KEY,
+    })};`)
+})
 
 // ── /api/agent ────────────────────────────────────────
 
@@ -227,6 +298,16 @@ app.post('/api/chat', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+app.use(express.static(DIST_DIR))
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(DIST_DIR, 'index.html'))
+})
+
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(DIST_DIR, 'index.html'))
 })
 
 const PORT = process.env.PORT || 3001

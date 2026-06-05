@@ -46,16 +46,26 @@ npm install
 
 # 2. 复制环境变量模板并填入真实值
 cp .env.example .env
-# 编辑 .env，填入 Supabase 项目地址、密钥、DeepSeek API key
+# 编辑 .env，填入 Supabase 项目地址、密钥、DeepSeek 或 OpenAI API key
 
 # 3. 跑数据库迁移
 # 把 sql/*.sql 文件按编号顺序在 Supabase SQL Editor 里执行
+# 000_core_tables.sql 必须最先执行
 
 # 4. 启动（同时跑 Vite + 后端代理）
 npm run dev
 ```
 
 访问 [http://localhost:5173](http://localhost:5173)。
+后端健康检查：[http://localhost:3001/health](http://localhost:3001/health)。
+
+没有 `.env` 时应用也可以启动，但会停在配置提示页；填好 Supabase 和模型密钥后重启即可登录和保存数据。
+
+## 云端部署
+
+FocusTree 可以作为单个 Node 服务部署：先执行 `npm run build`，再用 `npm start` 启动。生产环境里 Express 会同时提供 API、前端页面和 `/runtime-config.js` 运行时配置。
+
+详细步骤见 [DEPLOY.md](./DEPLOY.md)。
 
 ## 项目文档
 

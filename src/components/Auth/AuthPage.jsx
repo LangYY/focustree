@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, supabaseConfig } from '../../lib/supabase'
 
 export default function AuthPage() {
   const [mode, setMode] = useState('login') // 'login' | 'signup'
@@ -8,6 +8,56 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+
+  if (!supabaseConfig.isConfigured) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          background: '#0f1117',
+          color: '#e5e7eb',
+        }}
+      >
+        <div
+          style={{
+            width: 420,
+            background: '#1a1d27',
+            borderRadius: 16,
+            padding: '36px',
+            border: '1px solid #2d3148',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>还没有连接 Supabase</div>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: '#9ca3af', marginBottom: 18 }}>
+            FocusTree 已经启动，但还不能登录和保存数据。配置本地环境变量后重启应用即可使用。
+          </div>
+          <div
+            style={{
+              background: '#0f1117',
+              border: '1px solid #2d3148',
+              borderRadius: 10,
+              padding: '14px 16px',
+              fontSize: 13,
+              lineHeight: 1.8,
+              color: '#cbd5e1',
+              fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+              wordBreak: 'break-all',
+            }}
+          >
+            VITE_SUPABASE_URL<br />
+            VITE_SUPABASE_ANON_KEY<br />
+            SUPABASE_URL<br />
+            SUPABASE_SERVICE_ROLE_KEY<br />
+            DEEPSEEK_API_KEY 或 OPENAI_API_KEY
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -20,7 +70,13 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       } else {
-        const { error } = await supabase.auth.signUp({ email, password })
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: window.location.origin,
+          },
+        })
         if (error) throw error
         setMessage('注册成功！请检查邮箱验证链接，然后回来登录。')
         setMode('login')

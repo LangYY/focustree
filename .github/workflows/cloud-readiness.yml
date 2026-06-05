@@ -1,0 +1,44 @@
+name: Cloud readiness
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Start production server
+        run: |
+          npm start > /tmp/focustree.log 2>&1 &
+          echo $! > /tmp/focustree.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3001/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/focustree.log
+          exit 1
+
+      - run: npm run cloud:smoke -- http://127.0.0.1:3001 --allow-unconfigured
+
+      - name: Stop production server
+        if: always()
+        run: |
+          if [ -f /tmp/focustree.pid ]; then
+            kill "$(cat /tmp/focustree.pid)" || true
+          fi

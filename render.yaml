@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: focustree
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: LLM_PROVIDER
+        value: deepseek
+      - key: LLM_TIMEOUT_MS
+        value: 45000
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL_CHAT
+        value: gpt-4o-mini
+      - key: OPENAI_MODEL_REASONER
+        value: gpt-4o
