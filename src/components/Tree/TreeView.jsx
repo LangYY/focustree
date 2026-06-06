@@ -103,6 +103,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const zoomRef = useRef(null)
   const rootRef = useRef(null)   // 缓存 d3 hierarchy root，供高亮 effect 使用
   const treeDataRef = useRef(treeData)
+  const autoCenteredRef = useRef(false)
 
   const [contextMenu, setContextMenu] = useState(null)  // { x, y, node }
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
@@ -216,7 +217,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
   // 渲染树
   useEffect(() => {
-    if (!treeData || !svgRef.current) return
+    if (!treeData || !svgRef.current) {
+      autoCenteredRef.current = false
+      return
+    }
 
     const height = svgRef.current.clientHeight
 
@@ -388,7 +392,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const treeH = maxY - minY
     const offsetX = MARGIN.left - Math.min(...xs)
     const offsetY = (height - treeH) / 2 - minY + 30
-    g.attr('transform', `translate(${offsetX},${offsetY})`)
+    if (!autoCenteredRef.current) {
+      g.attr('transform', `translate(${offsetX},${offsetY})`)
+      autoCenteredRef.current = true
+    }
 
   }, [treeData, userGoal, density, startInlineRename])
 

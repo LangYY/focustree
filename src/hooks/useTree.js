@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { flatToTree, findNodeById, collectSubtree, sortByParentFirst, sortByDepthDesc, SAMPLE_DATA } from '../lib/treeUtils'
+import { flatToTree, findNodeById, collectSubtree, sortByParentFirst, sortByDepthDesc, flattenTree, SAMPLE_DATA } from '../lib/treeUtils'
 
 const MAX_HISTORY = 30
 
@@ -9,6 +9,19 @@ function stripRuntimeNodeFields(node) {
   delete raw.children
   delete raw.annotations
   return raw
+}
+
+async function restoreAnnotations(nodes, userId) {
+  const rows = (nodes || [])
+    .map(node => node.annotations ? {
+      ...node.annotations,
+      node_id: node.id,
+      user_id: userId,
+    } : null)
+    .filter(Boolean)
+  if (!rows.length) return
+  const { error } = await supabase.from('node_annotations').upsert(rows, { onConflict: 'node_id' })
+  if (error) console.warn('[restoreAnnotations]', error.message)
 }
 
 export function useTree(user) {
@@ -61,7 +74,13 @@ export function useTree(user) {
     setLoading(false)
   }, [user])
 
-  useEffect(() => { loadNodes() }, [loadNodes])
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve().then(() => {
+      if (!cancelled) loadNodes()
+    })
+    return () => { cancelled = true }
+  }, [loadNodes])
 
   // ── 历史工具 ─────────────────────────────────────────
 
@@ -78,8 +97,7 @@ export function useTree(user) {
     if (last.redoFn) {
       setFuture(prev => [...prev.slice(-(MAX_HISTORY - 1)), last])
     }
-    await loadNodes()
-  }, [history, loadNodes])
+  }, [history])
 
   const redo = useCallback(async () => {
     if (!future.length) return
@@ -88,11 +106,10 @@ export function useTree(user) {
     setFuture(prev => prev.slice(0, -1))
     await next.redoFn()
     setHistory(prev => [...prev.slice(-(MAX_HISTORY - 1)), next])
-    await loadNodes()
-  }, [future, loadNodes])
+  }, [future])
 
   // ── 展开/折叠：内存先变，DB 异步 fire-and-forget ─────
-  // 关键：必须持久化，否则任何后续 loadNodes()（CRUD 后都会触发）会重置回 DB 状态
+  // 关键：必须持久化，否则手动 reload/重新打开页面后会重置回 DB 状态
 
   const toggleNode = useCallback((id) => {
     let nextExpanded = null
@@ -166,15 +183,28 @@ export function useTree(user) {
         status: prevStatus,
         completed_at: prevCompleted,
       }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, {
+        status: prevStatus,
+        completed_at: prevCompleted,
+      }) : prev)
     }, async () => {
       await supabase.from('nodes').update({
         status,
         completed_at: nextCompleted,
       }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, {
+        status,
+        completed_at: nextCompleted,
+        last_active_at: nowIso,
+      }) : prev)
     })
 
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+    setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, {
+      status,
+      completed_at: nextCompleted,
+      last_active_at: nowIso,
+    }) : prev)
+  }, [user, treeData, pushHistory])
 
   // ── 重命名 ────────────────────────────────────────────
 
@@ -189,12 +219,14 @@ export function useTree(user) {
 
     pushHistory(`重命名「${prevName}」→「${nextName}」`, async () => {
       await supabase.from('nodes').update({ name: prevName }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, { name: prevName }) : prev)
     }, async () => {
       await supabase.from('nodes').update({ name: nextName }).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, { name: nextName }) : prev)
     })
 
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+    setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, { name: nextName }) : prev)
+  }, [user, treeData, pushHistory])
 
   // ── 新增节点（可带 AI 自动生成的 annotations）────────
 
@@ -240,26 +272,29 @@ export function useTree(user) {
         const { error: annErr } = await supabase.from('node_annotations').insert(insertedAnnotation)
         if (annErr) console.warn('[addNode] annotations write:', annErr.message)
       }
+      const localNode = { ...insertedNode, annotations: insertedAnnotation, children: [] }
 
       pushHistory(`添加「${name}」`, async () => {
         await supabase.from('nodes').delete().eq('id', newId).eq('user_id', user.id)
+        setTreeData(prev => removeNodeFromTree(prev, newId))
       }, async () => {
-        await supabase.from('nodes').insert(insertedNode)
+        await supabase.from('nodes').insert(stripRuntimeNodeFields(localNode))
         if (insertedAnnotation) {
           await supabase.from('node_annotations').upsert(insertedAnnotation, { onConflict: 'node_id' })
         }
+        setTreeData(prev => insertNodeInTree(prev, localNode))
       })
+      setTreeData(prev => insertNodeInTree(prev, localNode))
     }
 
-    await loadNodes()
     return newId
-  }, [user, loadNodes, pushHistory])
+  }, [user, pushHistory])
 
   // ── 给已有节点打/改策略标签 ──────────────────────────
 
   const annotateNode = useCallback(async (nodeId, annotations) => {
     if (!user || !nodeId || !annotations) return
-    const { error } = await supabase.from('node_annotations').upsert({
+    const annotationPayload = {
       node_id: nodeId,
       user_id: user.id,
       roi_type:      annotations.roi_type      || null,
@@ -269,10 +304,11 @@ export function useTree(user) {
       risk:          annotations.risk          || null,
       strategic_tag: annotations.strategic_tag || null,
       ai_notes:      annotations.ai_notes      || null,
-    }, { onConflict: 'node_id' })
+    }
+    const { error } = await supabase.from('node_annotations').upsert(annotationPayload, { onConflict: 'node_id' })
     if (error) console.warn('[annotateNode]', error.message)
-    await loadNodes()
-  }, [user, loadNodes])
+    setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, annotationPayload) : prev)
+  }, [user])
 
   // ── 删除节点（级联删除子节点）────────────────────────
 
@@ -308,17 +344,20 @@ export function useTree(user) {
     pushHistory(`更新「${node.name}」详情`, async () => {
       if (hadAnnotation) {
         await writeDetails(prevDetails)
+        setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, { ai_notes: prevDetails || null }) : prev)
       } else {
         await supabase.from('node_annotations').delete()
           .eq('node_id', nodeId)
           .eq('user_id', user.id)
+        setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, null) : prev)
       }
     }, async () => {
       await writeDetails(nextDetails)
+      setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, { ai_notes: nextDetails.trim() ? nextDetails : null }) : prev)
     })
 
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+    setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, { ai_notes: nextDetails.trim() ? nextDetails : null }) : prev)
+  }, [user, treeData, pushHistory])
 
   const deleteNode = useCallback(async (nodeId) => {
     if (!user) return
@@ -336,15 +375,18 @@ export function useTree(user) {
     pushHistory(`删除「${nodeName}」`, async () => {
       const toInsert = sortByParentFirst(snapshot).map(stripRuntimeNodeFields)
       await supabase.from('nodes').insert(toInsert)
+      await restoreAnnotations(snapshot, user.id)
+      setTreeData(prev => insertFlatNodesInTree(prev, snapshot))
     }, async () => {
       for (const n of sorted) {
         await supabase.from('nodes').delete()
           .eq('id', n.id).eq('user_id', user.id)
       }
+      setTreeData(prev => removeNodeFromTree(prev, nodeId))
     })
 
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+    setTreeData(prev => removeNodeFromTree(prev, nodeId))
+  }, [user, treeData, pushHistory])
 
   // ── 移动节点到另一父节点 ──────────────────────────────
 
@@ -457,6 +499,7 @@ export function useTree(user) {
           .eq('id', item.id)
           .eq('user_id', user.id)
       ))
+      setTreeData(prev => prev ? reorderSiblingsInTree(prev, parentId, prevOrder) : prev)
     }, async () => {
       await Promise.all(nextPositions.map(item =>
         supabase
@@ -465,6 +508,7 @@ export function useTree(user) {
           .eq('id', item.id)
           .eq('user_id', user.id)
       ))
+      setTreeData(prev => prev ? reorderSiblingsInTree(prev, parentId, nextPositions) : prev)
     })
   }, [user, treeData, pushHistory])
 
@@ -472,6 +516,8 @@ export function useTree(user) {
 
   const clearAll = useCallback(async () => {
     if (!user) return
+    const treeSnapshot = treeData
+    const annotationSnapshot = treeSnapshot ? flattenTree(treeSnapshot).filter(n => n.type !== 'root' && n.annotations) : []
     const { data: allNodes, error: fetchErr } = await supabase
       .from('nodes').select('*').eq('user_id', user.id)
 
@@ -490,16 +536,19 @@ export function useTree(user) {
       const toInsert = sortByParentFirst(allNodes).map(stripRuntimeNodeFields)
       const { error } = await supabase.from('nodes').insert(toInsert)
       if (error) console.error('[clearAll] undo:', error.message)
+      await restoreAnnotations(annotationSnapshot, user.id)
+      setTreeData(treeSnapshot)
     }, async () => {
       const redoSorted = sortByDepthDesc(allNodes)
       for (const n of redoSorted) {
         await supabase.from('nodes').delete()
           .eq('id', n.id).eq('user_id', user.id)
       }
+      setTreeData(null)
     })
 
-    await loadNodes()
-  }, [user, loadNodes, pushHistory])
+    setTreeData(null)
+  }, [user, treeData, pushHistory])
 
   // ── 权重更新 ──────────────────────────────────────────
 
@@ -531,9 +580,7 @@ export function useTree(user) {
       await supabase.from('nodes').update({ weight: nextWeight }).eq('id', nodeId).eq('user_id', user.id)
       setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, nextWeight) : prev)
     })
-
-    await loadNodes()
-  }, [user, treeData, loadNodes, pushHistory])
+  }, [user, treeData, pushHistory])
 
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
@@ -567,6 +614,77 @@ function updateNodeWeightInTree(node, nodeId, weight) {
   if (node.id === nodeId) return { ...node, weight }
   if (!node.children?.length) return node
   return { ...node, children: node.children.map(c => updateNodeWeightInTree(c, nodeId, weight)) }
+}
+
+function updateNodeFieldsInTree(node, nodeId, fields) {
+  if (!node) return node
+  if (node.id === nodeId) return { ...node, ...fields }
+  if (!node.children?.length) return node
+  return { ...node, children: node.children.map(c => updateNodeFieldsInTree(c, nodeId, fields)) }
+}
+
+function updateNodeAnnotationInTree(node, nodeId, annotation) {
+  if (!node) return node
+  if (node.id === nodeId) {
+    if (annotation === null) return { ...node, annotations: null }
+    return {
+      ...node,
+      annotations: {
+        ...(node.annotations || {}),
+        ...annotation,
+        node_id: nodeId,
+        updated_at: new Date().toISOString(),
+      },
+    }
+  }
+  if (!node.children?.length) return node
+  return { ...node, children: node.children.map(c => updateNodeAnnotationInTree(c, nodeId, annotation)) }
+}
+
+function insertNodeInTree(tree, nodeToInsert) {
+  const normalized = {
+    ...nodeToInsert,
+    children: nodeToInsert.children || [],
+  }
+  const parentId = normalized.parent_id || null
+  const root = tree || { id: 'root', type: 'root', children: [] }
+
+  function walk(node) {
+    const isTarget = (parentId == null && node.id === 'root') || node.id === parentId
+    if (isTarget) {
+      const withoutDuplicate = (node.children || []).filter(child => child.id !== normalized.id)
+      const children = [...withoutDuplicate, normalized]
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      return { ...node, children, expanded: true }
+    }
+    if (!node.children?.length) return node
+    return { ...node, children: node.children.map(walk) }
+  }
+
+  return walk(root)
+}
+
+function insertFlatNodesInTree(tree, nodes) {
+  return sortByParentFirst(nodes || []).reduce((nextTree, node) => {
+    const normalized = {
+      ...node,
+      children: [],
+    }
+    return insertNodeInTree(nextTree, normalized)
+  }, tree || { id: 'root', type: 'root', children: [] })
+}
+
+function removeNodeFromTree(tree, nodeId) {
+  if (!tree || !nodeId) return tree
+  if (tree.id === nodeId) return null
+  if (!tree.children?.length) return tree
+  return {
+    ...tree,
+    children: tree.children
+      .filter(child => child.id !== nodeId)
+      .map(child => removeNodeFromTree(child, nodeId))
+      .filter(Boolean),
+  }
 }
 
 /**
