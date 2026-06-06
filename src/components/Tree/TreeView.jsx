@@ -20,6 +20,7 @@ const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
 const TAIL_HANDLE_GAP = 14
 const TAIL_HANDLE_RADIUS = 5
+const TAIL_HANDLE_HIT_RADIUS = 12
 
 function shouldShowLabel(node, density) {
   const data = node?.data || node
@@ -397,32 +398,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .style('cursor', 'crosshair')
       .attr('pointer-events', 'all')
 
-    tail.append('line')
-      .attr('x1', -12)
-      .attr('x2', -TAIL_HANDLE_RADIUS - 2)
-      .attr('y1', 0)
-      .attr('y2', 0)
-      .attr('stroke', '#64748b')
-      .attr('stroke-width', 1.5)
-      .attr('stroke-linecap', 'round')
-      .attr('pointer-events', 'none')
+    tail.append('circle')
+      .attr('class', 'node-add-tail-hit')
+      .attr('r', TAIL_HANDLE_HIT_RADIUS)
+      .attr('fill', 'transparent')
+      .attr('pointer-events', 'all')
 
     tail.append('circle')
       .attr('class', 'node-add-tail-circle')
       .attr('r', TAIL_HANDLE_RADIUS)
-      .attr('fill', '#111827')
-      .attr('stroke', '#94a3b8')
-      .attr('stroke-width', 1.5)
+      .attr('fill', '#94a3b8')
+      .attr('stroke', 'none')
+      .attr('stroke-width', 0)
       .attr('pointer-events', 'none')
-
-    tail.append('text')
-      .attr('dy', '0.33em')
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#cbd5e1')
-      .attr('font-size', 8)
-      .attr('font-weight', 800)
-      .attr('pointer-events', 'none')
-      .text('+')
 
     // 居中定位
     const xs = nodes.map(d => d.y)
@@ -730,8 +718,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         if (current.handleEl) {
           current.handleEl.style.cursor = ''
           d3.select(current.handleEl).select('.node-add-tail-circle')
-            .attr('stroke', '#94a3b8')
-            .attr('stroke-width', 1.5)
+            .attr('r', TAIL_HANDLE_RADIUS)
+            .attr('fill', '#94a3b8')
+            .attr('stroke', 'none')
+            .attr('stroke-width', 0)
         }
         if (current.previousBodyUserSelect !== undefined) {
           document.body.style.userSelect = current.previousBodyUserSelect
@@ -764,8 +754,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           childDragRef.current.dragging = true
           disableAddDuringDrag()
           d3.select(childDragRef.current.handleEl).select('.node-add-tail-circle')
-            .attr('stroke', '#34d399')
-            .attr('stroke-width', 2.5)
+            .attr('r', TAIL_HANDLE_RADIUS + 1)
+            .attr('fill', '#34d399')
         }
 
         if (childDragRef.current.dragging && childDragRef.current.previewBadge) {
