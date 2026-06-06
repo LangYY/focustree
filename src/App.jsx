@@ -10,6 +10,7 @@ import ChatHistoryPanel from './components/Chat/ChatHistoryPanel'
 import LearnedPatternsPanel from './components/Chat/LearnedPatternsPanel'
 import RecommendationLogPanel from './components/Chat/RecommendationLogPanel'
 import TodayCard from './components/Tree/TodayCard'
+import NodeDetailPanel from './components/Tree/NodeDetailPanel'
 import BackupPanel from './components/Modals/BackupPanel'
 import { useTree } from './hooks/useTree'
 import { useChat } from './hooks/useChat'
@@ -17,6 +18,14 @@ import { useUserProfile } from './hooks/useUserProfile'
 import { useDailyFocus } from './hooks/useDailyFocus'
 import { useWeeklyReview } from './hooks/useWeeklyReview'
 import { useBackup } from './hooks/useBackup'
+
+const DEFAULT_PROJECT_COLOR = '#4A8C5C'
+
+function defaultNodeName(type) {
+  if (type === 'project') return '新项目'
+  if (type === 'category') return '新分类'
+  return '新任务'
+}
 
 export default function App() {
   const [user, setUser]           = useState(null)
@@ -29,6 +38,7 @@ export default function App() {
   const [recsOpen,    setRecsOpen]    = useState(false)
   const [backupOpen,  setBackupOpen]  = useState(false)
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
+  const [selectedNodeId, setSelectedNodeId] = useState(null)
   const resetZoomRef              = useRef(null)
 
   // 模型选择持久化
@@ -76,7 +86,7 @@ export default function App() {
     density, setDensity,
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateWeight, moveNode, reorderNode,
+    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateNodeDetails, updateWeight, moveNode, reorderNode,
     history, future, canUndo, canRedo, lastAction, nextAction, undo, redo,
   } = useTree(user)
 
@@ -118,7 +128,7 @@ export default function App() {
     addNode, renameNode, updateStatus,
     deleteNode: guardedDeleteNode,
     clearAll: guardedClearAll,
-    annotateNode, updateWeight, expandAll, collapseAll,
+    annotateNode, updateNodeDetails, updateWeight, expandAll, collapseAll,
   }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
@@ -137,6 +147,29 @@ export default function App() {
 
   // 周末回顾
   const weeklyReview = useWeeklyReview(user, goal, injectReviewMessage)
+
+  const selectedNode = selectedNodeId ? findNodeInTree(treeData, selectedNodeId) : null
+
+  const handleNodeSelect = useCallback((node) => {
+    if (!node?.id) return
+    setHighlightedNodeId(node.id)
+    setSelectedNodeId(node.id)
+  }, [])
+
+  const createDefaultNode = useCallback(async (parentNode, type) => {
+    const nodeType = type || 'task'
+    const newId = await addNode({
+      name: defaultNodeName(nodeType),
+      type: nodeType,
+      parentId: parentNode?.id || null,
+      color: nodeType === 'project' ? DEFAULT_PROJECT_COLOR : undefined,
+    })
+    if (newId) {
+      setHighlightedNodeId(newId)
+      setSelectedNodeId(newId)
+    }
+    return newId
+  }, [addNode])
 
   // 备份系统
   const backup = useBackup(user, /* onAfterRestore */ () => {
@@ -159,11 +192,11 @@ export default function App() {
     const { node, childType, status } = payload
 
     if (action === 'add-child') {
-      setModal({ parentNode: node, defaultType: childType })
+      await createDefaultNode(node, childType)
     }
     if (action === 'add-sibling') {
       const parentNode = node.parent_id ? findNodeInTree(treeData, node.parent_id) : null
-      setModal({ parentNode, defaultType: node.type === 'project' ? 'project' : (childType || node.type || 'task') })
+      await createDefaultNode(parentNode, node.type === 'project' ? 'project' : (childType || node.type || 'task'))
     }
     if (action === 'rename') return
     if (action === 'status') {
@@ -197,7 +230,7 @@ export default function App() {
         await guardedDeleteNode(node.id)
       }
     }
-  }, [updateStatus, guardedDeleteNode, updateWeight, treeData])
+  }, [updateStatus, guardedDeleteNode, updateWeight, treeData, createDefaultNode])
 
   // ── 新建节点 ────────────────────────────────────────
   const handleAddNode = useCallback(async ({ name, type, color, parentId }) => {
@@ -296,12 +329,12 @@ export default function App() {
                 treeData={treeData}
                 userGoal={goal}
                 density={density}
-                onNodeSelect={node => setHighlightedNodeId(node.id)}
+                onNodeSelect={handleNodeSelect}
                 onNodeToggle={node => toggleNode(node.id)}
                 onContextAction={handleContextAction}
                 resetZoomRef={resetZoomRef}
                 highlightedNodeId={highlightedNodeId}
-                onLeafAdd={(node, childType) => setModal({ parentNode: node, defaultType: childType })}
+                onLeafAdd={createDefaultNode}
                 onDropBranch={handleDropBranch}
                 onRenameNode={renameNode}
               />
@@ -310,6 +343,19 @@ export default function App() {
         </div>
 
         {/* 对话面板 */}
+        <NodeDetailPanel
+          key={[
+            selectedNode?.id || 'empty',
+            selectedNode?.updated_at || '',
+            selectedNode?.annotations?.updated_at || '',
+          ].join(':')}
+          node={selectedNode}
+          onClose={() => setSelectedNodeId(null)}
+          onRenameNode={renameNode}
+          onUpdateDetails={updateNodeDetails}
+          onStatusChange={updateStatus}
+        />
+
         <ChatPanel
           messages={messages}
           isLoading={chatLoading}

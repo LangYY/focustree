@@ -276,6 +276,50 @@ export function useTree(user) {
 
   // ── 删除节点（级联删除子节点）────────────────────────
 
+  const updateNodeDetails = useCallback(async (nodeId, details) => {
+    if (!user || !nodeId) return
+    const node = findNodeById(treeData, nodeId)
+    if (!node || node.type === 'root') return
+
+    const prevDetails = node.annotations?.ai_notes || ''
+    const nextDetails = String(details ?? '')
+    if (prevDetails === nextDetails) return
+
+    const hadAnnotation = Boolean(node.annotations)
+    const writeDetails = async (value) => {
+      await supabase.from('node_annotations').upsert({
+        node_id: nodeId,
+        user_id: user.id,
+        ai_notes: value.trim() ? value : null,
+      }, { onConflict: 'node_id' })
+    }
+
+    const { error } = await supabase.from('node_annotations').upsert({
+      node_id: nodeId,
+      user_id: user.id,
+      ai_notes: nextDetails.trim() ? nextDetails : null,
+    }, { onConflict: 'node_id' })
+
+    if (error) {
+      console.warn('[updateNodeDetails]', error.message)
+      return
+    }
+
+    pushHistory(`更新「${node.name}」详情`, async () => {
+      if (hadAnnotation) {
+        await writeDetails(prevDetails)
+      } else {
+        await supabase.from('node_annotations').delete()
+          .eq('node_id', nodeId)
+          .eq('user_id', user.id)
+      }
+    }, async () => {
+      await writeDetails(nextDetails)
+    })
+
+    await loadNodes()
+  }, [user, treeData, loadNodes, pushHistory])
+
   const deleteNode = useCallback(async (nodeId) => {
     if (!user) return
     const snapshot = collectSubtree(treeData, nodeId)
@@ -495,7 +539,7 @@ export function useTree(user) {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
     addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight, moveNode, reorderNode,
-    annotateNode,
+    annotateNode, updateNodeDetails,
     reload: loadNodes,
     // 历史
     history,
