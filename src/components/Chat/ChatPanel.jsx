@@ -67,6 +67,17 @@ function formatContextMeta(contextPolicy) {
   return parts.join(' · ')
 }
 
+function formatLocalRoute(route) {
+  const labels = {
+    stats: '统计',
+    selected_node: '当前节点',
+    time_tasks: '时间任务',
+    active_tasks: '任务清单',
+    search: '搜索',
+  }
+  return labels[route] || ''
+}
+
 /**
  * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
@@ -656,6 +667,7 @@ export default function ChatPanel({
                 {msg.role === 'assistant' && msg.kind === 'local' && (
                   <div className="mt-1 text-[10px] text-gray-600">
                     本地算法 · 0 token
+                    {formatLocalRoute(msg.local_route) && ` · ${formatLocalRoute(msg.local_route)}`}
                   </div>
                 )}
                 {msg.isError && onRetry && (

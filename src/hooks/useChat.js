@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { treeToPromptText, flattenTree, findNodeById } from '../lib/treeUtils'
 import { getClientTime } from '../lib/clientTime'
 import { classifyIntent } from '../lib/intentClassifier'
+import { routeLocalQuery } from '../lib/agentRouter'
 
 const WELCOME = {
   id: 'welcome',
@@ -597,6 +598,30 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         setIsLoading(false)
       }
       return  // 短路成功，不打 LLM
+    }
+
+    const localQuery = routeLocalQuery(content, treeData, {
+      selectedNodeId: options.selectedNodeId,
+      userGoal,
+    })
+    if (localQuery?.matched) {
+      const assistantMsg = {
+        id: uuid(),
+        role: 'assistant',
+        content: localQuery.reply,
+        kind: 'local',
+        local_route: localQuery.route,
+      }
+      setMessages(prev => [...prev, assistantMsg])
+      if (user) {
+        supabase.from('conversations').insert({
+          user_id: user.id, role: 'assistant', content: localQuery.reply,
+          session_id: activeSession,
+        })
+      }
+      setIsLoading(false)
+      abortRef.current = null
+      return
     }
 
     try {
