@@ -410,7 +410,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('fill', '#94a3b8')
       .attr('stroke', 'none')
       .attr('stroke-width', 0)
+      .attr('opacity', 0)
       .attr('pointer-events', 'none')
+
+    node.filter(d => d.data.type !== 'root')
+      .on('mouseenter.tail', function () {
+        d3.select(this).select('.node-add-tail-circle')
+          .attr('opacity', 0.95)
+      })
+      .on('mouseleave.tail', function () {
+        if (childDragRef.current.sourceEl === this) return
+        d3.select(this).select('.node-add-tail-circle')
+          .attr('opacity', 0)
+      })
 
     // 居中定位
     const xs = nodes.map(d => d.y)
@@ -684,6 +696,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       document.body.style.userSelect = 'none'
       document.body.style.webkitUserSelect = 'none'
       handleEl.style.cursor = 'copy'
+      d3.select(handleEl).select('.node-add-tail-circle')
+        .attr('opacity', 0.95)
       setContextMenu(null)
       setTooltip(null)
 
@@ -722,6 +736,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
             .attr('fill', '#94a3b8')
             .attr('stroke', 'none')
             .attr('stroke-width', 0)
+            .attr('opacity', 0)
         }
         if (current.previousBodyUserSelect !== undefined) {
           document.body.style.userSelect = current.previousBodyUserSelect
