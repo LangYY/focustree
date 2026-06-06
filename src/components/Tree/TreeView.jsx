@@ -18,9 +18,7 @@ const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
-const TAIL_HANDLE_GAP = 14
-const TAIL_HANDLE_RADIUS = 5
-const TAIL_HANDLE_HIT_RADIUS = 12
+const ADD_CHILD_DRAG_MIN_X = 28
 
 function shouldShowLabel(node, density) {
   const data = node?.data || node
@@ -30,23 +28,15 @@ function shouldShowLabel(node, density) {
   return data?.type === 'project'
 }
 
-function estimateLabelWidth(node) {
-  const data = node?.data || node
-  const name = String(data?.name || '')
-  const charWidth = data?.type === 'project' ? 8 : 7
-  return Math.min(DROP_LABEL_WIDTH - 22, Math.max(30, name.length * charWidth))
-}
-
-function getTailOffsetX(node, density) {
-  const data = node?.data || node
-  const radius = getNodeRadius(data?.type)
-  if (!shouldShowLabel(data, density)) return radius + 26
-  return radius + 6 + estimateLabelWidth(data) + TAIL_HANDLE_GAP
-}
-
 function childTypeFor(node) {
   const data = node?.data || node
   return data?.type === 'project' ? 'category' : 'task'
+}
+
+function isRightAddGesture(startX, startY, endX, endY) {
+  const dx = endX - startX
+  const dy = Math.abs(endY - startY)
+  return dx >= ADD_CHILD_DRAG_MIN_X && dx >= dy * 0.7
 }
 
 function dragPreviewPath(startX, startY, endX, endY) {
@@ -118,7 +108,6 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
   const [editingNode, setEditingNode] = useState(null)  // { id, name, left, top, width }
   const dragRef      = useRef({})  // { node, startX, startY, dragging, sourceEl, pointerId }
-  const childDragRef = useRef({})
   const suppressClickRef = useRef(false)
   const addDisabledRef = useRef(false)
   const addClickTimerRef = useRef(null)
@@ -391,39 +380,6 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       })
       .text(d => d.data.name)
 
-    const tail = node.filter(d => d.data.type !== 'root')
-      .append('g')
-      .attr('class', 'node-add-tail')
-      .attr('transform', d => `translate(${getTailOffsetX(d, density)},0)`)
-      .style('cursor', 'crosshair')
-      .attr('pointer-events', 'all')
-
-    tail.append('circle')
-      .attr('class', 'node-add-tail-hit')
-      .attr('r', TAIL_HANDLE_HIT_RADIUS)
-      .attr('fill', 'transparent')
-      .attr('pointer-events', 'all')
-
-    tail.append('circle')
-      .attr('class', 'node-add-tail-circle')
-      .attr('r', TAIL_HANDLE_RADIUS)
-      .attr('fill', '#94a3b8')
-      .attr('stroke', 'none')
-      .attr('stroke-width', 0)
-      .attr('opacity', 0)
-      .attr('pointer-events', 'none')
-
-    node.filter(d => d.data.type !== 'root')
-      .on('mouseenter.tail', function () {
-        d3.select(this).select('.node-add-tail-circle')
-          .attr('opacity', 0.95)
-      })
-      .on('mouseleave.tail', function () {
-        if (childDragRef.current.sourceEl === this) return
-        d3.select(this).select('.node-add-tail-circle')
-          .attr('opacity', 0)
-      })
-
     // 居中定位
     const xs = nodes.map(d => d.y)
     const ys = nodes.map(d => d.x)
@@ -624,215 +580,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       window.setTimeout(() => { suppressClickRef.current = false }, 180)
     }
 
-    const startChildDrag = (event, options) => {
-      if (childDragRef.current.node || dragRef.current.node) return false
-      if ('button' in event && event.button !== 0) return false
-
-      const handleEl = event.target.closest?.('.node-add-tail')
-      if (!handleEl) return false
-
-      const nodeEl = handleEl.closest?.('.node')
-      if (!nodeEl) return false
-      const nodeId = nodeEl.getAttribute('data-node-id')
-      if (!nodeId) return false
-
-      const hNode = rootRef.current?.descendants().find(n => n.data.id === nodeId)
-      if (!hNode || hNode.data.type === 'root') return false
-
-      event.preventDefault()
-      event.stopPropagation()
-      window.getSelection?.()?.removeAllRanges?.()
-
-      const density = densityRef.current
-      const startX = hNode.y + getTailOffsetX(hNode, density)
-      const startY = hNode.x
-      const previewLine = d3.select(gRef.current)
-        .append('path')
-        .attr('class', 'child-drag-preview-link')
-        .attr('d', dragPreviewPath(startX, startY, startX, startY))
-        .attr('fill', 'none')
-        .attr('stroke', '#34d399')
-        .attr('stroke-width', 2.5)
-        .attr('stroke-linecap', 'round')
-        .attr('stroke-dasharray', '5,4')
-        .attr('opacity', 0.95)
-        .attr('pointer-events', 'none')
-
-      const previewBadge = d3.select(gRef.current)
-        .append('g')
-        .attr('class', 'child-drag-preview-badge')
-        .attr('pointer-events', 'none')
-        .style('opacity', 0)
-      previewBadge.append('rect')
-        .attr('rx', 4).attr('ry', 4)
-        .attr('fill', 'rgba(15, 17, 23, 0.92)')
-        .attr('stroke', '#34d399')
-        .attr('stroke-width', 1)
-      previewBadge.append('text')
-        .attr('class', 'child-drag-preview-badge-text')
-        .attr('fill', '#e5e7eb')
-        .attr('font-size', 11)
-        .attr('text-anchor', 'middle')
-        .attr('dy', '0.35em')
-
-      childDragRef.current = {
-        node: hNode,
-        startX: event.clientX,
-        startY: event.clientY,
-        lineStartX: startX,
-        lineStartY: startY,
-        lastX: event.clientX,
-        lastY: event.clientY,
-        dragging: false,
-        handleEl,
-        sourceEl: nodeEl,
-        previewLine,
-        previewBadge,
-        pointerId: options.pointerId,
-        previousBodyUserSelect: document.body.style.userSelect,
-        previousBodyWebkitUserSelect: document.body.style.webkitUserSelect,
-      }
-
-      document.body.style.userSelect = 'none'
-      document.body.style.webkitUserSelect = 'none'
-      handleEl.style.cursor = 'copy'
-      d3.select(handleEl).select('.node-add-tail-circle')
-        .attr('opacity', 0.95)
-      setContextMenu(null)
-      setTooltip(null)
-
-      if (options.usePointerCapture) {
-        try {
-          svgEl.setPointerCapture(options.pointerId)
-        } catch {
-          // Pointer capture can fail for synthetic events; document listeners still cover the drag.
-        }
-      }
-
-      const listenerOptions = { capture: true, passive: false }
-      const isSamePointer = (e) => options.pointerId == null || e.pointerId === options.pointerId
-
-      const cleanup = () => {
-        document.removeEventListener(options.moveEvent, onMove, listenerOptions)
-        document.removeEventListener(options.upEvent, onUp, listenerOptions)
-        if (options.cancelEvent) document.removeEventListener(options.cancelEvent, onCancel, listenerOptions)
-        if (options.usePointerCapture) {
-          try {
-            if (svgEl.hasPointerCapture(options.pointerId)) svgEl.releasePointerCapture(options.pointerId)
-          } catch {
-            // Ignore release races after pointercancel.
-          }
-        }
-      }
-
-      const restore = () => {
-        const current = childDragRef.current
-        current.previewLine?.remove()
-        current.previewBadge?.remove()
-        if (current.handleEl) {
-          current.handleEl.style.cursor = ''
-          d3.select(current.handleEl).select('.node-add-tail-circle')
-            .attr('r', TAIL_HANDLE_RADIUS)
-            .attr('fill', '#94a3b8')
-            .attr('stroke', 'none')
-            .attr('stroke-width', 0)
-            .attr('opacity', 0)
-        }
-        if (current.previousBodyUserSelect !== undefined) {
-          document.body.style.userSelect = current.previousBodyUserSelect
-        }
-        if (current.previousBodyWebkitUserSelect !== undefined) {
-          document.body.style.webkitUserSelect = current.previousBodyWebkitUserSelect
-        }
-      }
-
-      const onMove = (e) => {
-        if (!isSamePointer(e) || !childDragRef.current.node) return
-        e.preventDefault()
-        e.stopPropagation()
-
-        childDragRef.current.lastX = e.clientX
-        childDragRef.current.lastY = e.clientY
-
-        const dx = e.clientX - childDragRef.current.startX
-        const dy = e.clientY - childDragRef.current.startY
-        const [lineEndX, lineEndY] = d3.pointer(e, gRef.current)
-        childDragRef.current.previewLine
-          ?.attr('d', dragPreviewPath(
-            childDragRef.current.lineStartX,
-            childDragRef.current.lineStartY,
-            lineEndX,
-            lineEndY
-          ))
-
-        if (!childDragRef.current.dragging && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
-          childDragRef.current.dragging = true
-          disableAddDuringDrag()
-          d3.select(childDragRef.current.handleEl).select('.node-add-tail-circle')
-            .attr('r', TAIL_HANDLE_RADIUS + 1)
-            .attr('fill', '#34d399')
-        }
-
-        if (childDragRef.current.dragging && childDragRef.current.previewBadge) {
-          const childType = childTypeFor(childDragRef.current.node)
-          const label = childType === 'category' ? '松手创建新分类' : '松手创建新任务'
-          const badge = childDragRef.current.previewBadge
-          const text = badge.select('.child-drag-preview-badge-text').text(label)
-          const padX = 8
-          const w = Math.max(92, label.length * 12 + padX * 2)
-          const h = 20
-          badge.select('rect')
-            .attr('x', -w / 2).attr('y', -h / 2)
-            .attr('width', w).attr('height', h)
-          text.attr('x', 0).attr('y', 0)
-          badge.attr('transform', `translate(${lineEndX + 34},${lineEndY - 12})`)
-            .style('opacity', 1)
-        }
-      }
-
-      const onUp = async (e) => {
-        if (!isSamePointer(e)) return
-        cleanup()
-
-        const {
-          dragging, node, startX: dragStartX, startY: dragStartY,
-          lastX = e.clientX, lastY = e.clientY,
-        } = childDragRef.current
-        const endX = e.clientX || lastX
-        const endY = e.clientY || lastY
-        const movedFarEnough =
-          Math.abs(endX - dragStartX) > DRAG_THRESHOLD ||
-          Math.abs(endY - dragStartY) > DRAG_THRESHOLD
-
-        restore()
-        childDragRef.current = {}
-
-        if (!node || (!dragging && !movedFarEnough)) return
-
-        e.preventDefault()
-        e.stopPropagation()
-        disableAddDuringDrag()
-        suppressPostDragClick()
-        scheduleEnableAdd()
-        await onLeafAddRef.current?.(node.data, childTypeFor(node), { source: 'tail-drag' })
-      }
-
-      const onCancel = (e) => {
-        if (!isSamePointer(e)) return
-        cleanup()
-        restore()
-        childDragRef.current = {}
-        scheduleEnableAdd()
-      }
-
-      document.addEventListener(options.moveEvent, onMove, listenerOptions)
-      document.addEventListener(options.upEvent, onUp, listenerOptions)
-      if (options.cancelEvent) document.addEventListener(options.cancelEvent, onCancel, listenerOptions)
-      return true
-    }
-
     const startBranchDrag = (event, options) => {
-      if (dragRef.current.node || childDragRef.current.node) return
+      if (dragRef.current.node) return
       if ('button' in event && event.button !== 0) return
 
       // 拖拽起手：圆点 或 紧贴圆点的小 drag-handle（task 这种小节点用）
@@ -974,12 +723,22 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           const sourceName = dragRef.current.node?.data?.name || '节点'
           const truncated = sourceName.length > 12 ? sourceName.slice(0, 12) + '…' : sourceName
           let label = count > 0 ? `${truncated} +${count}子` : truncated
+          const addGesture = isRightAddGesture(
+            dragRef.current.startX,
+            dragRef.current.startY,
+            e.clientX,
+            e.clientY
+          )
           if (drop?.node?.data?.name) {
             const targetName = drop.node.data.name.length > 10 ? drop.node.data.name.slice(0, 10) + '…' : drop.node.data.name
             label = drop.mode === 'reorder'
               ? `${drop.placement === 'before' ? '排到前面' : '排到后面'}：${targetName}`
               : `移入：${targetName}`
+          } else if (addGesture) {
+            label = childTypeFor(dragRef.current.node) === 'category' ? '松手创建新分类' : '松手创建新任务'
           }
+          dragRef.current.previewLine
+            ?.attr('stroke', !drop?.node && addGesture ? '#34d399' : '#60a5fa')
           const badge = dragRef.current.previewBadge
           const text = badge.select('.drag-preview-badge-text').text(label)
           const padX = 8
@@ -1049,6 +808,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
             mode: drop.mode,
             placement: drop.placement,
           })
+        } else if (isRightAddGesture(startX, startY, endX, endY)) {
+          onLeafAddRef.current?.(node.data, childTypeFor(node), { source: 'node-right-drag' })
         }
       }
 
@@ -1070,13 +831,6 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     const onPointerDown = (event) => {
       if (event.pointerType === 'mouse') return
-      if (startChildDrag(event, {
-        moveEvent: 'pointermove',
-        upEvent: 'pointerup',
-        cancelEvent: 'pointercancel',
-        pointerId: event.pointerId,
-        usePointerCapture: true,
-      })) return
       startBranchDrag(event, {
         moveEvent: 'pointermove',
         upEvent: 'pointerup',
@@ -1087,12 +841,6 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     }
 
     const onMouseDown = (event) => {
-      if (startChildDrag(event, {
-        moveEvent: 'mousemove',
-        upEvent: 'mouseup',
-        pointerId: null,
-        usePointerCapture: false,
-      })) return
       startBranchDrag(event, {
         moveEvent: 'mousemove',
         upEvent: 'mouseup',
