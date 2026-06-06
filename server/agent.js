@@ -45,7 +45,7 @@ const VALID_STRATEGIC_TAG = ['现金流', '资产积累', '信号建立', '维�
  */
 export async function runAgent({
   message, treeText, nodeIdSet, history, userGoal,
-  recentSummaries = [], learnedPatterns = [], hitRate = null,
+  recentSummaries = [], learnedPatterns = [], userMemory = null, contextMode = 'global_tree', hitRate = null,
   clientTime = null,
   model = 'auto', provider = 'deepseek', apiKey,
   signal = null,
@@ -55,6 +55,7 @@ export async function runAgent({
     history,
     recentSummaries,
     learnedPatterns,
+    userMemory,
     hitRate,
   }, contextPolicy)
   const systemPrompt = buildSystemPrompt(
@@ -62,6 +63,8 @@ export async function runAgent({
     userGoal,
     effectiveContext.recentSummaries,
     effectiveContext.learnedPatterns,
+    effectiveContext.userMemory,
+    contextMode,
     effectiveContext.hitRate,
     clientTime,
     contextPolicy
@@ -73,7 +76,7 @@ export async function runAgent({
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     if (signal?.aborted) {
       console.log('[agent] aborted by client')
-      return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, context_policy: contextPolicy, aborted: true }
+      return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, context_policy: { policy: contextPolicy, mode: contextMode }, aborted: true }
     }
 
     const messages = buildMessages(effectiveContext.history, message)
@@ -92,7 +95,7 @@ export async function runAgent({
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
-        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, context_policy: contextPolicy, aborted: true }
+        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, context_policy: { policy: contextPolicy, mode: contextMode }, aborted: true }
       }
       lastError = `API 调用失败：${err.message}`
       lastErrorKind = 'api'
@@ -129,7 +132,7 @@ export async function runAgent({
     return {
       ...normalized,
       model_used: attemptModel,
-      context_policy: contextPolicy,
+      context_policy: { policy: contextPolicy, mode: contextMode },
       usage: llmResult.usage || null,
       usage_cost: llmResult.usageCost || null,
     }
@@ -146,7 +149,7 @@ export async function runAgent({
     reply: failMsg,
     actions: [],
     model_used: modelName,
-    context_policy: contextPolicy,
+    context_policy: { policy: contextPolicy, mode: contextMode },
     error: true,
   }
 }
@@ -228,18 +231,21 @@ function applyContextPolicy(context, policy) {
     history: [],
     recentSummaries: [],
     learnedPatterns: [],
+    userMemory: null,
     hitRate: null,
   }
 }
 
 // ── Prompt 构建 ───────────────────────────────────────
 
-function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, hitRate, clientTime, contextPolicy) {
+function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns, userMemory, contextMode, hitRate, clientTime, contextPolicy) {
   const goalBlock      = formatGoalBlock(userGoal)
-  const summariesBlock = formatSummariesBlock(recentSummaries)
+  const summariesBlock = userMemory ? '' : formatSummariesBlock(recentSummaries)
+  const userMemoryBlock = formatUserMemoryBlock(userMemory)
   const hitRateBlock   = formatHitRateBlock(hitRate)
   const timeBlock      = formatTimeBlock(clientTime)
   const contextBlock   = formatContextPolicyBlock(contextPolicy)
+  const scopeBlock     = formatContextModeBlock(contextMode)
 
   // 大小保护：截断过长的 treeText，保留前面的高层级节点
   const MAX_TREE_LEN = 6000
@@ -253,7 +259,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
   }
 
   // 学习模式限制最近 10 条，避免 prompt 膨胀
-  const learnedBlock = formatLearnedBlock((learnedPatterns || []).slice(-10))
+  const learnedBlock = userMemory ? '' : formatLearnedBlock((learnedPatterns || []).slice(-10))
 
   return `你是「专注树」AI 助理。风格：简洁、克制、有判断力。不写空泛鼓励，但要给出真实取舍和结构化判断。纯操作确认一句话收住；复杂梳理、规划、推荐要说清楚为什么。你的唯一输出必须是合法 JSON，不得包含任何额外文字、markdown 代码块或注释。
 
@@ -263,7 +269,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
 3. 不要描述"树已清空 / 已清除 / 重新开始"等过去操作——除非本轮用户当下又要求清空。
 4. 不要在 reply 开头总结上次操作的结果。专注回答用户当下的问题。
 5. 旧 assistant 回复中的项目压缩口径不是产品规则；当前规则以本 system prompt 和当前项目树为准。
-${contextBlock}${timeBlock}${goalBlock}${summariesBlock}${learnedBlock}${hitRateBlock}
+${contextBlock}${scopeBlock}${timeBlock}${goalBlock}${userMemoryBlock}${summariesBlock}${learnedBlock}${hitRateBlock}
 ## 当前项目树（括号内是节点 ID，操作时必须使用这些 ID）
 ${trimmedTree}
 
@@ -696,6 +702,59 @@ function formatContextPolicyBlock(contextPolicy) {
  * 注入当前时间：让 AI 能做时段感知的推荐
  * clientTime = { iso, weekday, hour, period }  // period: '清晨' | '上午' | '下午' | '傍晚' | '晚上' | '深夜'
  */
+function formatContextModeBlock(contextMode) {
+  const mode = contextMode || 'global_tree'
+  const labels = {
+    global_tree: '全局项目树',
+    focused_node: '当前节点局部',
+    task_pick: '活跃任务候选',
+    minimal: '极简项目索引',
+  }
+  const scope = labels[mode] || labels.global_tree
+  const caution = mode === 'global_tree'
+    ? '本轮包含完整项目树，可以做全局判断。'
+    : '本轮只包含局部或压缩上下文；不要假装看过完整项目树。若用户要求全局判断，请说明需要切换到全局梳理。'
+  return `
+## 本轮上下文范围
+范围：${scope}
+${caution}
+`
+}
+
+function formatUserMemoryBlock(memory) {
+  if (!memory) return ''
+  const patternLines = Array.isArray(memory.patterns)
+    ? memory.patterns
+        .filter(Boolean)
+        .slice(0, 8)
+        .map(item => redactDeprecatedPlanningPolicy(String(item)).trim())
+        .filter(Boolean)
+        .map(item => `- ${item}`)
+    : []
+  const recentLines = Array.isArray(memory.recent)
+    ? memory.recent
+        .filter(Boolean)
+        .slice(0, 3)
+        .map(item => redactDeprecatedPlanningPolicy(String(item)).trim())
+        .filter(Boolean)
+        .map(item => `- ${item}`)
+    : []
+  const lines = []
+  if (patternLines.length) {
+    lines.push('长期用户记忆：')
+    lines.push(...patternLines)
+  }
+  if (recentLines.length) {
+    lines.push('近期压缩回顾：')
+    lines.push(...recentLines)
+  }
+  if (!lines.length) return ''
+  return `
+## 用户记忆（压缩摘要，不是完整对话历史）
+${lines.join('\n')}
+`
+}
+
 function formatTimeBlock(clientTime) {
   if (!clientTime) return ''
   const { weekday, hour, period } = clientTime

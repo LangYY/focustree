@@ -51,6 +51,22 @@ function formatTokenCount(usage) {
   return `${total.toLocaleString()} tok`
 }
 
+function formatContextMeta(contextPolicy) {
+  if (!contextPolicy) return ''
+  const policy = typeof contextPolicy === 'string' ? contextPolicy : contextPolicy.policy
+  const mode = typeof contextPolicy === 'object' ? contextPolicy.mode : ''
+  const labels = {
+    global_tree: '全局',
+    focused_node: '局部',
+    task_pick: '任务',
+    minimal: '极简',
+  }
+  const parts = []
+  if (labels[mode]) parts.push(labels[mode])
+  if (policy === 'isolated') parts.push('上下文隔离')
+  return parts.join(' · ')
+}
+
 /**
  * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
@@ -634,7 +650,7 @@ export default function ChatPanel({
                     {formatResponseTime(msg.response_ms) && ` · ${formatResponseTime(msg.response_ms)}`}
                     {formatCost(msg.usage_cost) && ` · ${formatCost(msg.usage_cost)}`}
                     {formatTokenCount(msg.usage) && ` · ${formatTokenCount(msg.usage)}`}
-                    {msg.context_policy === 'isolated' && ' · 上下文隔离'}
+                    {formatContextMeta(msg.context_policy) && ` · ${formatContextMeta(msg.context_policy)}`}
                   </div>
                 )}
                 {msg.role === 'assistant' && msg.kind === 'local' && (

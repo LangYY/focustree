@@ -359,7 +359,7 @@ export default function App() {
         <ChatPanel
           messages={messages}
           isLoading={chatLoading}
-          onSend={(text) => sendMessage(text, treeData)}
+          onSend={(text) => sendMessage(text, treeData, { selectedNodeId })}
           isOpen={chatOpen}
           goalText={goalText}
           goalExpired={goalExpired}
@@ -376,7 +376,7 @@ export default function App() {
           onHoverNode={setHighlightedNodeId}
           onTriggerReview={() => weeklyReview.generate({ silent: false })}
           reviewGenerating={weeklyReview.generating}
-          onRetry={() => retryLastMessage(treeData)}
+          onRetry={() => retryLastMessage(treeData, { selectedNodeId })}
           onCancel={cancelRequest}
           onApplyDraftPlan={(messageId) => applyDraftPlan(messageId, treeData)}
           onApplyWeightPlan={(messageId) => applyWeightPlan(messageId, treeData)}

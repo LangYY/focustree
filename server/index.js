@@ -98,7 +98,7 @@ app.get('/runtime-config.js', (req, res) => {
 // ── /api/agent ────────────────────────────────────────
 
 app.post('/api/agent', async (req, res) => {
-  const { message, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, hitRate, clientTime } = req.body
+  const { message, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, userMemory, contextMode, hitRate, clientTime } = req.body
 
   if (!message) return res.status(400).json({ error: 'message is required' })
   if (!API_KEY)  return res.status(500).json({ error: 'API key not configured' })
@@ -106,6 +106,7 @@ app.post('/api/agent', async (req, res) => {
   console.log('\n──── [/api/agent] ────')
   console.log('msg:', message.slice(0, 60))
   console.log('model:', model || 'auto')
+  console.log('contextMode:', contextMode || 'legacy')
   console.log('goal:', userGoal?.text || '(none)')
   console.log('summaries:', recentSummaries?.length || 0, '·', 'learned:', learnedPatterns?.length || 0)
   console.log('hitRate:', hitRate ? `${hitRate.completed}/${hitRate.total}` : '(none)')
@@ -136,6 +137,8 @@ app.post('/api/agent', async (req, res) => {
       userGoal: userGoal || null,
       recentSummaries: recentSummaries || [],
       learnedPatterns: learnedPatterns || [],
+      userMemory: userMemory || null,
+      contextMode: contextMode || 'global_tree',
       hitRate:  hitRate || null,
       clientTime: clientTime || null,
       model:    model || 'auto',

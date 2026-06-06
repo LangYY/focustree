@@ -12,6 +12,12 @@ const WELCOME = {
 
 const SESSION_LOAD_LIMIT = 200
 const AGENT_HISTORY_MESSAGE_LIMIT = 14
+const AGENT_HISTORY_LIMIT_BY_MODE = {
+  global_tree: 6,
+  focused_node: 4,
+  task_pick: 4,
+  minimal: 2,
+}
 
 /**
  * 浏览器内生成 UUIDv4
@@ -22,6 +28,136 @@ function uuid() {
     const r = Math.random() * 16 | 0
     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
   })
+}
+
+function classifyAgentContextMode(content) {
+  const text = String(content || '').trim()
+  if (!text) return 'minimal'
+
+  const globalWords = /(全局|整体|全部|所有项目|整棵树|项目树|总览|全盘|大盘|重新规划|整体规划|所有分支|所有主线|全局梳理|全局整理|项目总成)/
+  if (globalWords.test(text)) return 'global_tree'
+
+  const focusedWords = /(这个|这里|当前|这个节点|这个项目|这件事|这条线|下一步|怎么拆|怎么做|卡住|详情|补充)/
+  if (focusedWords.test(text)) return 'focused_node'
+
+  const taskPickWords = /(今天|本周|这周|明天|现在|接下来|下一步|优先级|先做什么|做什么|该做什么|安排|deadline|截止|到期)/
+  if (taskPickWords.test(text)) return 'task_pick'
+
+  if (text.length > 80 || /\n/.test(text)) return 'global_tree'
+  return 'minimal'
+}
+
+function buildAgentTreeContext(treeData, userGoal, mode, selectedNodeId, content) {
+  if (!treeData) return { treeText: '（暂无项目）', contextMode: 'minimal' }
+  if (mode === 'global_tree') {
+    return { treeText: treeToPromptText(treeData, userGoal), contextMode: mode }
+  }
+  if (mode === 'focused_node') {
+    return { treeText: focusedNodeContext(treeData, selectedNodeId, content), contextMode: mode }
+  }
+  if (mode === 'task_pick') {
+    return { treeText: activeTaskContext(treeData), contextMode: mode }
+  }
+  return { treeText: minimalTreeContext(treeData), contextMode: mode }
+}
+
+function buildUserMemory(learnedPatterns, recentSummaries) {
+  const patterns = (learnedPatterns || [])
+    .slice(-8)
+    .map(p => {
+      if (typeof p === 'string') return p
+      return p?.observation || p?.text || p?.summary || ''
+    })
+    .filter(Boolean)
+
+  const summaries = (recentSummaries || [])
+    .slice(0, 3)
+    .map(s => s?.summary || '')
+    .filter(Boolean)
+
+  if (!patterns.length && !summaries.length) return null
+  return { patterns, recent: summaries }
+}
+
+function compactHistoryForMode(messages, mode) {
+  const limit = AGENT_HISTORY_LIMIT_BY_MODE[mode] || AGENT_HISTORY_MESSAGE_LIMIT
+  return messages
+    .filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
+    .slice(-limit)
+    .map(m => ({ role: m.role, content: String(m.content || '').slice(0, 600) }))
+}
+
+function focusedNodeContext(treeData, selectedNodeId, content) {
+  const allNodes = flattenTree(treeData).filter(n => n.type !== 'root')
+  let node = selectedNodeId ? findNodeById(treeData, selectedNodeId) : null
+  if (!node) node = findMentionedNode(allNodes, content)
+  if (!node) return activeTaskContext(treeData)
+
+  const parent = node.parent_id ? findNodeById(treeData, node.parent_id) : null
+  const siblings = parent?.children?.filter(n => n.id !== node.id) || []
+  const children = node.children || []
+  const lines = [
+    `上下文范围：当前节点局部，不是整棵树。`,
+    `当前节点：${nodeLine(node)}`,
+  ]
+  if (parent) lines.push(`父节点：${nodeLine(parent)}`)
+  if (siblings.length) {
+    lines.push(`同级节点：${siblings.slice(0, 12).map(nodeLine).join('；')}`)
+  }
+  if (children.length) {
+    lines.push(`子节点：${children.slice(0, 18).map(nodeLine).join('；')}`)
+  }
+  const details = node.annotations?.ai_notes
+  if (details) lines.push(`节点详情：${String(details).slice(0, 800)}`)
+  return lines.join('\n')
+}
+
+function activeTaskContext(treeData) {
+  const rows = []
+  walkTree(treeData, [], node => {
+    if (node.type === 'root') return
+    if (node.status === 'done' || node.status === 'dormant') return
+    if (node.type === 'task' || !node.children?.length) {
+      rows.push(`${nodePath([...node.__path, node])} (id:${node.id}, type:${node.type})`)
+    }
+  })
+  return [
+    '上下文范围：活跃任务候选，不是整棵树。',
+    ...(rows.length ? rows.slice(0, 36) : ['暂无活跃任务候选。']),
+  ].join('\n')
+}
+
+function minimalTreeContext(treeData) {
+  const projects = (treeData.children || []).slice(0, 20)
+  return [
+    '上下文范围：极简项目索引，不是整棵树。',
+    ...projects.map(node => `${node.name} (id:${node.id}, status:${node.status || 'active'}, children:${node.children?.length || 0})`),
+  ].join('\n')
+}
+
+function findMentionedNode(nodes, content) {
+  const text = String(content || '')
+  const exact = nodes.find(n => n.name && text.includes(n.name))
+  if (exact) return exact
+  return nodes
+    .filter(n => n.name && n.name.length >= 2 && text.includes(n.name.slice(0, Math.min(6, n.name.length))))
+    .sort((a, b) => String(b.name).length - String(a.name).length)[0] || null
+}
+
+function walkTree(node, path, visit) {
+  const current = { ...node, __path: path }
+  visit(current)
+  for (const child of node.children || []) {
+    walkTree(child, [...path, node].filter(n => n.type !== 'root'), visit)
+  }
+}
+
+function nodeLine(node) {
+  return `${node.name} (id:${node.id}, type:${node.type}, status:${node.status || 'active'}, children:${node.children?.length || 0})`
+}
+
+function nodePath(nodes) {
+  return nodes.filter(Boolean).map(n => n.name).join(' > ')
 }
 
 export function useChat(user, treeActions, userGoal, model = 'auto') {
@@ -306,7 +442,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
 
   // ── 发消息 ───────────────────────────────────────────────
 
-  const sendMessage = useCallback(async (content, treeData) => {
+  const sendMessage = useCallback(async (content, treeData, options = {}) => {
     // 若 AI 正在处理，将消息加入队列
     if (isLoading) {
       setPendingQueue(prev => [...prev, content])
@@ -464,20 +600,27 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
 
     try {
-      const treeText = treeToPromptText(treeData, userGoal)
+      const requestedContextMode = classifyAgentContextMode(content)
+      const { treeText, contextMode } = buildAgentTreeContext(
+        treeData,
+        userGoal,
+        requestedContextMode,
+        options.selectedNodeId,
+        content
+      )
       const nodeIds  = treeData
         ? flattenTree(treeData).map(n => n.id).filter(Boolean)
         : []
 
       // 当前 session 内的近期对话（服务端会做 sanitize，这里只传原始消息）
-      const history = messages
-        .filter(m => m.id !== 'welcome' && (m.role === 'user' || m.role === 'assistant'))
-        .slice(-AGENT_HISTORY_MESSAGE_LIMIT)
+      const history = compactHistoryForMode(messages, contextMode)
+      const userMemory = buildUserMemory(learnedPatterns, recentSummaries)
 
       const agentStartedAt = performance.now()
       const result = await callAgent({
         content, treeText, nodeIds, history, userGoal, model,
-        recentSummaries, learnedPatterns, hitRate,
+        recentSummaries: [], learnedPatterns: [],
+        userMemory, contextMode, hitRate,
         clientTime: getClientTime(),
         signal: controller.signal,
       })
@@ -600,7 +743,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
           const next = prev[0]
           const rest = prev.slice(1)
           // 延迟一 tick 保证 state 更新
-          setTimeout(() => sendMessage(next, treeData), 0)
+          setTimeout(() => sendMessage(next, treeData, options), 0)
           return rest
         }
         setIsLoading(false)
@@ -786,10 +929,10 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   /**
    * 重试最后一条用户消息
    */
-  const retryLastMessage = useCallback(async (treeData) => {
+  const retryLastMessage = useCallback(async (treeData, options = {}) => {
     const content = lastUserMessageRef.current
     if (!content || isLoading) return
-    await sendMessage(content, treeData)
+    await sendMessage(content, treeData, options)
   }, [sendMessage, isLoading])
 
   return {
@@ -817,7 +960,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
 
 // ── 调用服务端 Agent ──────────────────────────────────
 
-async function callAgent({ content, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, hitRate, clientTime, signal }) {
+async function callAgent({ content, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, userMemory, contextMode, hitRate, clientTime, signal }) {
   const res = await fetch('/api/agent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -827,6 +970,8 @@ async function callAgent({ content, treeText, nodeIds, history, userGoal, model,
       userGoal, model,
       recentSummaries,
       learnedPatterns,
+      userMemory,
+      contextMode,
       hitRate,
       clientTime,
     }),
