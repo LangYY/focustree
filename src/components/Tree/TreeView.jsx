@@ -18,6 +18,7 @@ const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
+const TERMINAL_BRANCH_HIT_WIDTH = 18
 const ADD_CHILD_DRAG_MIN_X = 28
 const MIDDLE_MOUSE_BUTTON = 1
 const ZOOM_MIN = 0.15
@@ -35,6 +36,17 @@ function shouldShowLabel(node, density) {
 function childTypeFor(node) {
   const data = node?.data || node
   return data?.type === 'project' ? 'category' : 'task'
+}
+
+function childTypeForParent(node) {
+  const data = node?.data || node
+  if (!data || data.type === 'root') return 'project'
+  return childTypeFor(data)
+}
+
+function addPreviewLabel(type, sameLevel = false) {
+  const label = type === 'project' ? '项目' : type === 'category' ? '分类' : '任务'
+  return sameLevel ? `松手创建同级${label}` : `松手创建新${label}`
 }
 
 function isRightAddGesture(startX, startY, endX, endY) {
@@ -254,6 +266,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     const nodes = root.descendants()
     const links = root.links()
+    const terminalLinks = links.filter(d =>
+      d.target.data.type !== 'root' &&
+      !(Array.isArray(d.target.data.children) && d.target.data.children.length > 0)
+    )
 
     const g = d3.select(gRef.current)
     g.selectAll('*').remove()
@@ -276,6 +292,20 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .call(selection => applyLinkStrokeWidth(selection))
       .attr('opacity', 0.45)
       .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+
+    // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
+    g.selectAll('.terminal-branch-add-hit')
+      .data(terminalLinks)
+      .join('path')
+      .attr('class', 'terminal-branch-add-hit')
+      .attr('data-target-id', d => d.target.data.id || '')
+      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+      .attr('fill', 'none')
+      .attr('stroke', 'transparent')
+      .attr('stroke-width', d => Math.max(TERMINAL_BRANCH_HIT_WIDTH, linkStrokeWidth(d) + 10))
+      .attr('stroke-linecap', 'round')
+      .attr('pointer-events', 'stroke')
+      .style('cursor', 'crosshair')
 
     // 节点组
     const node = g.selectAll('.node')
@@ -617,6 +647,56 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       window.setTimeout(() => { suppressClickRef.current = false }, 180)
     }
 
+    const resolveBranchDragSource = (event) => {
+      const handleEl =
+        event.target.closest?.('.node-main-circle') ||
+        event.target.closest?.('.node-drag-handle')
+
+      if (handleEl) {
+        const nodeEl = handleEl.closest?.('.node')
+        const nodeId = nodeEl?.getAttribute('data-node-id')
+        const hNode = nodeId
+          ? rootRef.current?.descendants().find(n => n.data.id === nodeId)
+          : null
+        if (!hNode || hNode.data.type === 'root') return null
+        return {
+          hNode,
+          nodeId,
+          sourceEl: nodeEl,
+          handleEl,
+          addParentNode: hNode,
+          addType: childTypeFor(hNode),
+          addOnly: false,
+          sameLevelAdd: false,
+          lineStartX: hNode.y,
+          lineStartY: hNode.x,
+        }
+      }
+
+      const branchEl = event.target.closest?.('.terminal-branch-add-hit')
+      const nodeId = branchEl?.getAttribute('data-target-id')
+      if (!nodeId) return null
+
+      const hNode = rootRef.current?.descendants().find(n => n.data.id === nodeId)
+      if (!hNode || hNode.data.type === 'root') return null
+
+      const nodeEl = gRef.current?.querySelector(`.node[data-node-id="${nodeId}"]`)
+      const parentNode = hNode.parent?.data?.type === 'root' ? null : hNode.parent
+      const [lineStartX, lineStartY] = d3.pointer(event, gRef.current)
+      return {
+        hNode,
+        nodeId,
+        sourceEl: nodeEl || branchEl,
+        handleEl: branchEl,
+        addParentNode: parentNode,
+        addType: childTypeForParent(hNode.parent),
+        addOnly: true,
+        sameLevelAdd: true,
+        lineStartX,
+        lineStartY,
+      }
+    }
+
     const startCanvasPan = (event) => {
       if (event.button !== MIDDLE_MOUSE_BUTTON || !zoomRef.current) return false
       if (canvasPanRef.current.active) return true
@@ -694,31 +774,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       if (dragRef.current.node) return
       if ('button' in event && event.button !== 0) return
 
-      // 拖拽起手：圆点 或 紧贴圆点的小 drag-handle（task 这种小节点用）
-      // 注意：不用 .node-hit-area —— 那个向右延伸到 label 区，
-      //       会让"父节点 label 末尾"被误判成抓父节点
-      const handleEl =
-        event.target.closest?.('.node-main-circle') ||
-        event.target.closest?.('.node-drag-handle')
-      if (!handleEl) return
-
-      // 找到最近的 .node 容器
-      const nodeEl = handleEl.closest?.('.node')
-      if (!nodeEl) return
-      const nodeId = nodeEl.getAttribute('data-node-id')
-      if (!nodeId) return
-
-      // 从缓存 hierarchy 里查
-      const hNode = rootRef.current?.descendants().find(n => n.data.id === nodeId)
-      if (!hNode || hNode.data.type === 'root') return
+      // 起手范围：节点圆点/紧贴圆点的小 handle，或最末端枝干的透明命中线。
+      // 注意：不用 .node-hit-area —— 那个向右延伸到 label 区，会误抓父节点。
+      const source = resolveBranchDragSource(event)
+      if (!source) return
+      const { hNode, nodeId, sourceEl, handleEl } = source
 
       // 阻止浏览器默认行为（文本选中、三指拖拽等）
       event.preventDefault()
       event.stopPropagation()
       window.getSelection?.()?.removeAllRanges?.()
 
-      const startX = hNode.y
-      const startY = hNode.x
+      const startX = source.lineStartX
+      const startY = source.lineStartY
       const previewLine = d3.select(gRef.current)
         .append('path')
         .attr('class', 'drag-preview-link')
@@ -760,8 +828,13 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         lastX: event.clientX,
         lastY: event.clientY,
         dragging: false,
-        sourceEl: nodeEl,
+        sourceEl,
         handleEl,
+        previousHandleCursor: handleEl.style.cursor,
+        addParentNode: source.addParentNode,
+        addType: source.addType,
+        addOnly: source.addOnly,
+        sameLevelAdd: source.sameLevelAdd,
         descendantCount,
         previewBadge,
         previewLine,
@@ -772,7 +845,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       document.body.style.userSelect = 'none'
       document.body.style.webkitUserSelect = 'none'
       handleEl.style.cursor = 'grabbing'
-      nodeEl.style.cursor = 'grabbing'
+      if (sourceEl) sourceEl.style.cursor = 'grabbing'
       setContextMenu(null)
       setTooltip(null)
 
@@ -823,7 +896,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           d3.select(dragRef.current.sourceEl).attr('opacity', 0.65)
         }
 
-        const drop = dragRef.current.dragging
+        const drop = dragRef.current.dragging && !dragRef.current.addOnly
           ? findBranchDropTarget(e.clientX, e.clientY, dragRef.current.node, dragRef.current.sourceEl)
           : null
 
@@ -845,7 +918,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
               ? `${drop.placement === 'before' ? '排到前面' : '排到后面'}：${targetName}`
               : `移入：${targetName}`
           } else if (addGesture) {
-            label = childTypeFor(dragRef.current.node) === 'category' ? '松手创建新分类' : '松手创建新任务'
+            label = addPreviewLabel(dragRef.current.addType, dragRef.current.sameLevelAdd)
           }
           dragRef.current.previewLine
             ?.attr('stroke', !drop?.node && addGesture ? '#34d399' : '#60a5fa')
@@ -887,10 +960,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         const {
           dragging, sourceEl, node, startX, startY,
           lastX = e.clientX, lastY = e.clientY,
-          previousBodyUserSelect, handleEl,
+          previousBodyUserSelect, handleEl, previousHandleCursor,
+          addParentNode, addType, addOnly,
         } = dragRef.current
         restoreDragStyles({ sourceEl, previousBodyUserSelect })
-        if (handleEl) handleEl.style.cursor = 'grab'
+        if (handleEl) handleEl.style.cursor = previousHandleCursor || ''
         dragRef.current = {}
 
         if (!node) return
@@ -912,23 +986,30 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         suppressPostDragClick()
         scheduleEnableAdd()
 
-        const drop = findBranchDropTarget(endX, endY, node, sourceEl)
+        const drop = addOnly ? null : findBranchDropTarget(endX, endY, node, sourceEl)
         if (drop?.node) {
           onDropRef.current?.(node.data, drop.node.data, {
             mode: drop.mode,
             placement: drop.placement,
           })
         } else if (isRightAddGesture(startX, startY, endX, endY)) {
-          onLeafAddRef.current?.(node.data, childTypeFor(node), { source: 'node-right-drag' })
+          const parentData = addOnly
+            ? (addParentNode?.data?.type === 'root' ? null : addParentNode?.data || null)
+            : (addParentNode?.data || node.data)
+          onLeafAddRef.current?.(
+            parentData,
+            addType || childTypeFor(node),
+            { source: addOnly ? 'terminal-branch-drag' : 'node-right-drag' }
+          )
         }
       }
 
       const onCancel = (e) => {
         if (!isSamePointer(e)) return
         cleanup()
-        const { handleEl } = dragRef.current
+        const { handleEl, previousHandleCursor } = dragRef.current
         restoreDragStyles(dragRef.current)
-        if (handleEl) handleEl.style.cursor = 'grab'
+        if (handleEl) handleEl.style.cursor = previousHandleCursor || ''
         dragRef.current = {}
         scheduleEnableAdd()
       }

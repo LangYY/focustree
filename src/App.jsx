@@ -300,7 +300,6 @@ export default function App() {
         onDensityChange={setDensity}
         onExpandAll={expandAll}
         onCollapseAll={collapseAll}
-        onAddProject={() => setModal({ parentNode: null, defaultType: 'project' })}
         chatOpen={chatOpen}
         onToggleChat={() => setChatOpen(v => !v)}
         leafView={leafView}
@@ -335,8 +334,8 @@ export default function App() {
               <div style={{ fontSize: '48px', opacity: 0.3 }}>🌱</div>
               <div style={{ fontSize: '16px', color: '#9ca3af' }}>树是空的</div>
               <div style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', lineHeight: 1.6 }}>
-                点击顶部「＋ 新项目」创建第一个项目<br />
-                或者在右侧告诉 AI 你想做什么
+                在右侧告诉 AI 你想做什么<br />
+                树里有节点后，也可以从末端枝干拉出虚线继续增加
               </div>
             </div>
           ) : leafView ? (
