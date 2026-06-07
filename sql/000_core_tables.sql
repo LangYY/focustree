@@ -13,7 +13,7 @@ create table if not exists public.nodes (
 
   name text not null check (char_length(btrim(name)) > 0),
   type text not null check (type in ('project', 'category', 'task')),
-  status text not null default 'active' check (status in ('active', 'done', 'dormant')),
+  status text not null default 'active' check (status in ('active', 'done', 'dormant', 'dropped')),
 
   color text,
   weight real not null default 1.0 check (weight >= 0 and weight <= 2),

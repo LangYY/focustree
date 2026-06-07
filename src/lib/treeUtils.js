@@ -68,7 +68,8 @@ export function collectSubtree(tree, nodeId) {
   if (!node) return []
   const result = []
   function walk(n) {
-    const { children, ...raw } = n   // 去掉运行时的 children 数组
+    const raw = { ...n }
+    delete raw.children
     result.push(raw)
     n.children?.forEach(walk)
   }
@@ -128,6 +129,7 @@ export function getNodeRadius(type) {
 export function getNodeColor(node) {
   if (node.status === 'done') return '#22c55e'
   if (node.status === 'dormant') return '#eab308'
+  if (node.status === 'dropped') return '#6b7280'
   if (node.type === 'project') return node.color || '#6b7280'
   if (node.type === 'category') return '#9ca3af'
   return '#d1d5db'
@@ -148,6 +150,7 @@ function normalizedWeight(value) {
 function statusPressureMultiplier(status) {
   if (status === 'done') return 0.25
   if (status === 'dormant') return 0.45
+  if (status === 'dropped') return 0.08
   return 1
 }
 
@@ -290,11 +293,11 @@ function taskSpecificity(node) {
 
 function completenessFor(node, childMetas) {
   if (!node || node.type === 'root') return { completeness: 1, missingSlots: [] }
-  if (node.status === 'done') return { completeness: 1, missingSlots: [] }
+  if (node.status === 'done' || node.status === 'dropped') return { completeness: 1, missingSlots: [] }
 
   const children = Array.isArray(node.children) ? node.children : []
   const missingSlots = []
-  let score = 0
+  let score
 
   if (node.type === 'task') {
     score = taskSpecificity(node)
@@ -404,7 +407,7 @@ export function computeTreeNodeMetaMap(tree, options = {}) {
     const selfPressure = nodeBasePressure(node) + urgency * 0.8 + (1 - completeness) * 0.65
     const branchPressure = Math.max(0.05, (selfPressure + childPressure) * statusMultiplier)
     const taskCount = (node?.type === 'task' ? 1 : 0) + childMetas.reduce((sum, meta) => sum + meta.taskCount, 0)
-    const activeTaskCount = (node?.type === 'task' && node.status !== 'done' && node.status !== 'dormant' ? 1 : 0) +
+    const activeTaskCount = (node?.type === 'task' && node.status !== 'done' && node.status !== 'dormant' && node.status !== 'dropped' ? 1 : 0) +
       childMetas.reduce((sum, meta) => sum + meta.activeTaskCount, 0)
     const descendantCount = childMetas.reduce((sum, meta) => sum + 1 + meta.descendantCount, 0)
     const pressureSignal = Math.sqrt(branchPressure)
@@ -443,7 +446,7 @@ export function computeTreeNodeMetaMap(tree, options = {}) {
     meta.flow = flow
     meta.localShare = localShare
     const pressureRank = clamp(meta.branchPressure / (meta.branchPressure + 4))
-    const statusPenalty = node?.status === 'done' ? 0.35 : node?.status === 'dormant' ? 0.18 : 0
+    const statusPenalty = node?.status === 'dropped' ? 0.55 : node?.status === 'done' ? 0.35 : node?.status === 'dormant' ? 0.18 : 0
     meta.recommendationRank = clamp(
       flow * 0.48 +
         pressureRank * 0.18 +
@@ -514,7 +517,7 @@ export function findNodeById(tree, id) {
 export function treeToPromptText(tree, userGoal = null) {
   if (!tree) return '（暂无项目）'
   const lines = []
-  const STATUS = { active: '▶', done: '✓', dormant: '⏸' }
+  const STATUS = { active: '▶', done: '✓', dormant: '⏸', dropped: '✕' }
   const metaById = computeTreeNodeMetaMap(tree, { userGoal })
 
   function annoTag(node) {

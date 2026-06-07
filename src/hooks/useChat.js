@@ -117,7 +117,7 @@ function activeTaskContext(treeData) {
   const rows = []
   walkTree(treeData, [], node => {
     if (node.type === 'root') return
-    if (node.status === 'done' || node.status === 'dormant') return
+    if (node.status === 'done' || node.status === 'dormant' || node.status === 'dropped') return
     if (node.type === 'task' || !node.children?.length) {
       rows.push(`${nodePath([...node.__path, node])} (id:${node.id}, type:${node.type})`)
     }
@@ -1021,6 +1021,9 @@ async function executeAction(action, treeActions) {
       case 'mark_dormant':
         await treeActions.updateStatus(id, 'dormant')
         return { log: `已将「${action.name || id}」标记为暂停` }
+      case 'mark_dropped':
+        await treeActions.updateStatus(id, 'dropped')
+        return { log: `已将「${action.name || id}」标记为废弃` }
       case 'add_task': {
         const newId = await treeActions.addNode({
           name: action.name, type: 'task', parentId: action.parent,

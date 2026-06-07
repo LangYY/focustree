@@ -1,7 +1,7 @@
 import { computeTreeNodeMetaMap, flattenTree, findNodeById, getDerivedWeightMeta } from './treeUtils.js'
 
 const MODEL_JUDGMENT_WORDS = /(应该|建议|推荐|优先|先做什么|先做哪|取舍|规划|梳理|分析|判断|值不值得|要不要|是否|为什么|怎么|如何|帮我想|帮我拆|卡住)/
-const ACTIVE_STATUS = { active: '进行中', done: '已完成', dormant: '已暂停' }
+const ACTIVE_STATUS = { active: '进行中', done: '已完成', dormant: '已暂停', dropped: '已废弃' }
 const TYPE_LABEL = { project: '项目', category: '分类', task: '任务' }
 
 /**
@@ -80,11 +80,13 @@ function buildStatsReply(treeData) {
   const doneTasks = tasks.filter(node => node.status === 'done')
   const activeTasks = tasks.filter(node => node.status === 'active')
   const dormantTasks = tasks.filter(node => node.status === 'dormant')
-  const doneRate = tasks.length ? Math.round(doneTasks.length / tasks.length * 100) : 0
+  const droppedTasks = tasks.filter(node => node.status === 'dropped')
+  const effectiveTasks = tasks.filter(node => node.status !== 'dropped')
+  const doneRate = effectiveTasks.length ? Math.round(doneTasks.length / effectiveTasks.length * 100) : 0
 
   return [
     `本地统计：共 ${nodes.length} 个节点，其中项目 ${projects.length} 个、分类 ${categories.length} 个、任务 ${tasks.length} 个。`,
-    `任务状态：进行中 ${activeTasks.length} 个，已完成 ${doneTasks.length} 个，已暂停 ${dormantTasks.length} 个，完成率 ${doneRate}%。`,
+    `任务状态：进行中 ${activeTasks.length} 个，已完成 ${doneTasks.length} 个，已暂停 ${dormantTasks.length} 个，已废弃 ${droppedTasks.length} 个，完成率 ${doneRate}%。`,
   ].join('\n')
 }
 
@@ -93,6 +95,7 @@ function buildSelectedNodeReply(treeData, node) {
   const children = node.children || []
   const activeChildren = children.filter(child => child.status === 'active').length
   const doneChildren = children.filter(child => child.status === 'done').length
+  const droppedChildren = children.filter(child => child.status === 'dropped').length
   const details = String(node.annotations?.ai_notes || '').trim()
   const lines = [
     `当前节点：${node.name}`,
@@ -100,7 +103,7 @@ function buildSelectedNodeReply(treeData, node) {
   ]
 
   if (parent) lines.push(`父节点：${parent.name}`)
-  lines.push(`直属子节点：${children.length} 个（进行中 ${activeChildren}，已完成 ${doneChildren}）`)
+  lines.push(`直属子节点：${children.length} 个（进行中 ${activeChildren}，已完成 ${doneChildren}，已废弃 ${droppedChildren}）`)
   if (details) lines.push(`详情：${details.slice(0, 280)}${details.length > 280 ? '...' : ''}`)
   if (children.length) {
     lines.push(`子节点：${children.slice(0, 8).map(child => child.name).join('、')}${children.length > 8 ? ` 等 ${children.length} 个` : ''}`)
@@ -162,7 +165,7 @@ function buildSearchReply(treeData, text) {
 function rankOpenTasks(treeData, userGoal) {
   const metaById = computeTreeNodeMetaMap(treeData, { userGoal })
   return flattenTree(treeData)
-    .filter(node => node.type === 'task' && node.status !== 'done' && node.status !== 'dormant')
+    .filter(node => node.type === 'task' && node.status !== 'done' && node.status !== 'dormant' && node.status !== 'dropped')
     .map(node => ({
       node,
       path: nodePath(treeData, node),

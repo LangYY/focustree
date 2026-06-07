@@ -1,5 +1,5 @@
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
-const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
+const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308', dropped: '#6b7280' }
+const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中', dropped: '废弃' }
 
 function safeRatio(value, fallback = 1) {
   const numeric = Number(value)
@@ -33,7 +33,7 @@ export default function NodeTooltip({ x, y, node }) {
       style={style}
       className="bg-gray-900 border border-gray-700 rounded-xl shadow-xl px-3 py-2.5 text-xs max-w-48"
     >
-      <div className="font-semibold text-gray-100 mb-1">{node.name}</div>
+      <div className={`font-semibold mb-1 ${node.status === 'dropped' ? 'text-gray-400 line-through' : 'text-gray-100'}`}>{node.name}</div>
 
       <div className="flex items-center gap-1.5 mb-1">
         <span

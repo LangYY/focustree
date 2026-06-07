@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { getDerivedWeightMeta, getDerivedWeightMetaMap } from '../../lib/treeUtils'
 
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
-const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停' }
+const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308', dropped: '#6b7280' }
+const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停', dropped: '废弃' }
 
 function safePercent(value) {
   const numeric = Number(value)
@@ -38,6 +38,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
 
   const active  = tasks.filter(t => t.status === 'active')
   const dormant = tasks.filter(t => t.status === 'dormant')
+  const dropped = tasks.filter(t => t.status === 'dropped')
   const done    = tasks.filter(t => t.status === 'done')
 
   return (
@@ -49,6 +50,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
         <Section title="进行中" tasks={active}   onStatusChange={onStatusChange} />
         <Section title="暂停中" tasks={dormant}  onStatusChange={onStatusChange} />
         <Section title="已完成" tasks={done}     onStatusChange={onStatusChange} dimmed />
+        <Section title="已废弃" tasks={dropped}  onStatusChange={onStatusChange} dimmed />
       </div>
     </div>
   )
@@ -71,6 +73,7 @@ function Section({ title, tasks, onStatusChange, dimmed }) {
 }
 
 function TaskRow({ task, onStatusChange, dimmed }) {
+  const isInactive = task.status === 'done' || task.status === 'dropped'
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
@@ -93,7 +96,7 @@ function TaskRow({ task, onStatusChange, dimmed }) {
 
       {/* 任务名 */}
       <div className="flex-1 min-w-0">
-        <div className={`text-sm text-gray-200 truncate ${task.status === 'done' ? 'line-through text-gray-500' : ''}`}>
+        <div className={`text-sm text-gray-200 truncate ${isInactive ? 'line-through text-gray-500' : ''}`}>
           {task.name}
         </div>
         {task.projectName && (
@@ -103,6 +106,9 @@ function TaskRow({ task, onStatusChange, dimmed }) {
               className="inline-block w-2 h-2 rounded-full flex-shrink-0"
             />
             <span className="text-xs text-gray-500">{task.projectName}</span>
+            {task.status !== 'active' && (
+              <span className="text-xs text-gray-600">· {STATUS_LABEL[task.status] || task.status}</span>
+            )}
           </div>
         )}
       </div>

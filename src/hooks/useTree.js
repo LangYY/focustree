@@ -144,7 +144,7 @@ export function useTree(user) {
     }
   }, [user])
 
-  // ── 状态变更（mark_done / mark_active / mark_dormant）──
+  // ── 状态变更（mark_done / mark_active / mark_dormant / mark_dropped）──
 
   const updateStatus = useCallback(async (nodeId, status) => {
     if (!user) return
@@ -154,11 +154,16 @@ export function useTree(user) {
     const nowIso = new Date().toISOString()
     const nextCompleted = status === 'done' ? nowIso : null
 
-    await supabase.from('nodes').update({
+    const { error: statusErr } = await supabase.from('nodes').update({
       status,
       completed_at: nextCompleted,
       last_active_at: nowIso,
     }).eq('id', nodeId).eq('user_id', user.id)
+    if (statusErr) {
+      console.warn('[updateStatus]', statusErr.message)
+      alert(`状态保存失败：${statusErr.message}`)
+      return
+    }
 
     // 🔁 Outcome 闭环：标完成时，把对应的近期推荐回填为 completed
     if (status === 'done') {
@@ -177,7 +182,7 @@ export function useTree(user) {
       if (outcomeErr) console.warn('[updateStatus] outcome backfill:', outcomeErr.message)
     }
 
-    const statusLabel = { done: '完成', active: '进行中', dormant: '暂停' }
+    const statusLabel = { done: '完成', active: '进行中', dormant: '暂停', dropped: '废弃' }
     pushHistory(`标记「${node?.name}」为${statusLabel[status]}`, async () => {
       await supabase.from('nodes').update({
         status: prevStatus,

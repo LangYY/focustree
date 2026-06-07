@@ -355,16 +355,17 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         d3.select(this.parentNode).select('.node-status-mark').attr('opacity', 1)
       })
 
-    // 完成勾
-    node.filter(d => d.data.status === 'done')
+    // 状态标记：完成 / 废弃
+    node.filter(d => d.data.status === 'done' || d.data.status === 'dropped')
       .append('text')
       .attr('class', 'node-status-mark')
       .attr('dy', '0.35em')
       .attr('text-anchor', 'middle')
       .attr('fill', '#0f1117')
       .attr('font-size', d => getNodeRadius(d.data.type) * 0.9)
+      .attr('font-weight', 700)
       .attr('pointer-events', 'none')
-      .text('✓')
+      .text(d => d.data.status === 'dropped' ? '×' : '✓')
 
     // 标签
     node.filter(d => shouldShowLabel(d, density))
@@ -372,10 +373,12 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('class', 'node-label')
       .attr('x', d => getNodeRadius(d.data.type) + 6)
       .attr('dy', '0.35em')
-      .attr('fill', '#d1d5db')
+      .attr('fill', d => d.data.status === 'dropped' ? '#8b95a5' : '#d1d5db')
       .attr('font-size', d => d.data.type === 'project' ? 13 : 11)
       .attr('font-weight', d => d.data.type === 'project' ? 600 : 400)
       .attr('pointer-events', 'auto')
+      .style('opacity', d => d.data.status === 'dropped' ? 0.72 : 1)
+      .style('text-decoration', d => d.data.status === 'dropped' ? 'line-through' : null)
       .style('cursor', 'pointer')
       .on('click', (event, d) => {
         event.stopPropagation()

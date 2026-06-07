@@ -6,6 +6,7 @@ const STATUS_OPTIONS = [
   { value: 'active', label: '进行中' },
   { value: 'done', label: '完成' },
   { value: 'dormant', label: '暂停' },
+  { value: 'dropped', label: '废弃' },
 ]
 
 function typeLabel(type) {
@@ -149,7 +150,7 @@ export default function NodeDetailPanel({
 
         <div className="mb-4">
           <div className="mb-2 text-xs text-gray-400">状态</div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {STATUS_OPTIONS.map(option => (
               <button
                 key={option.value}

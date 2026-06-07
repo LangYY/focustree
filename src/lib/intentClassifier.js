@@ -139,11 +139,12 @@ function parseAdd(text, treeData) {
 }
 
 /**
- * 2. 标记完成/进行中/暂停
+ * 2. 标记完成/进行中/暂停/废弃
  *
  *   「X 做完了 / 完成了」
  *   「把 X 标记完成 / 标完成」
  *   「暂停 X / 把 X 搁置」
+ *   「废弃 X / 放弃 X」
  *   「恢复 X / X 继续做」
  */
 function parseStatus(text, treeData) {
@@ -156,6 +157,11 @@ function parseStatus(text, treeData) {
   m = text.match(/^(?:暂停|搁置|先放|放放|hold)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/i)
   if (!m) m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*(?:暂停|搁置|先放一放|hold)$/i)
   if (m) return statusAction(treeData, m[1], 'dormant')
+
+  // 废弃 / 放弃（保留节点，不删除）
+  m = text.match(/^(?:废弃|放弃|取消|不做|砍掉)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/)
+  if (!m) m = text.match(/^(?:把|将)?\s*(?:「|『)?(.+?)(?:」|』)?\s*(?:废弃|放弃|取消|标(?:记)?(?:为)?废弃|不做了?|砍掉)$/)
+  if (m) return statusAction(treeData, m[1], 'dropped')
 
   // 恢复
   m = text.match(/^(?:恢复|继续做|重启)\s*(?:「|『)?(.+?)(?:」|』)?\s*$/)
@@ -215,12 +221,12 @@ function parseWeight(text, treeData) {
 /**
  * 2b. 批量状态：明确要求把某节点及其后续/子任务一起切状态。
  *
- *   「暂停 X 及子任务」/「把 X 下所有任务标完成」/「恢复 X 整条分支」
+ *   「暂停 X 及子任务」/「把 X 下所有任务标完成」/「废弃 X 整条分支」/「恢复 X 整条分支」
  */
 function parseStatusSubtree(text, treeData) {
-  let m = text.match(new RegExp(`^(?:把|将)?\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*(?:都)?\\s*(?:标(?:记)?(?:为)?\\s*)?(完成|做完|搞定|暂停|搁置|恢复|重启|继续)(?:进行)?\\s*$`))
+  let m = text.match(new RegExp(`^(?:把|将)?\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*(?:都)?\\s*(?:标(?:记)?(?:为)?\\s*)?(完成|做完|搞定|暂停|搁置|废弃|放弃|取消|不做|砍掉|恢复|重启|继续)(?:进行)?\\s*$`))
   if (!m) {
-    m = text.match(new RegExp(`^(完成|做完|搞定|暂停|搁置|恢复|重启|继续)\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*$`))
+    m = text.match(new RegExp(`^(完成|做完|搞定|暂停|搁置|废弃|放弃|取消|不做|砍掉|恢复|重启|继续)\\s*(?:「|『)?(.+?)(?:」|』)?\\s*${SUBTREE_WORDS}\\s*$`))
     if (m) m = [m[0], m[2], m[1]]
   }
   if (!m) return { matched: false }
@@ -237,12 +243,16 @@ function parseStatusSubtree(text, treeData) {
     ? 'done'
     : /恢复|重启|继续/.test(statusWord)
       ? 'active'
-      : 'dormant'
+      : /废弃|放弃|取消|不做|砍掉/.test(statusWord)
+        ? 'dropped'
+        : 'dormant'
   const label = status === 'done'
     ? '标记为完成'
     : status === 'active'
       ? '恢复为进行中'
-      : '标记为暂停'
+      : status === 'dropped'
+        ? '标记为废弃'
+        : '标记为暂停'
 
   const nodes = collectSubtree(treeData, found.id).filter(n => n.type !== 'root')
   if (!nodes.length) return { matched: false }

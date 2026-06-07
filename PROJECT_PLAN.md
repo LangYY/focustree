@@ -87,7 +87,7 @@ focustree/
 | parent_id | uuid? | 自引用 |
 | name | text | |
 | type | text | `project` / `category` / `task` |
-| status | text | `active` / `done` / `dormant` |
+| status | text | `active` / `done` / `dormant` / `dropped` |
 | color | text? | 仅 project |
 | weight | real | 0-1，控制连线粗细 |
 | position | **bigint** | 排序键，毫秒时间戳（曾因 int 溢出踩坑） |
@@ -231,7 +231,7 @@ return safeFallback                         // "抱歉，能换个说法..."
 
 | type | 字段 | 干什么 |
 |---|---|---|
-| mark_done / mark_active / mark_dormant | id, name | 改状态 |
+| mark_done / mark_active / mark_dormant / mark_dropped | id, name | 改状态 |
 | add_task / add_category / add_project | name, parent?, color?, annotations? | 建节点 |
 | rename | id, name | 改名 |
 | delete | id, name | 删（级联） |

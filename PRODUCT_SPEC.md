@@ -32,7 +32,7 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 
 每个节点有：
 
-- `status`：`active`、`done`、`dormant`
+- `status`：`active`、`done`、`dormant`、`dropped`
 - `weight`：同级分支的当前精力配比
 - `expanded`：折叠展开状态
 - `annotations`：AI 或用户给出的策略标签
@@ -451,7 +451,7 @@ FocusTree 采用四层记忆：
 
 - 必须输出 3 件。
 - 至少 2 件引用树中真实节点。
-- 不推荐 done 或 dormant 任务。
+- 不推荐 done、dormant 或 dropped 任务。
 - 根据时段错峰安排任务。
 
 ### 4.10 周回顾算法

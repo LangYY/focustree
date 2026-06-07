@@ -18,7 +18,7 @@ import {
 
 const MAX_RETRIES = 3
 const VALID_TYPES = [
-  'mark_done', 'mark_active', 'mark_dormant',
+  'mark_done', 'mark_active', 'mark_dormant', 'mark_dropped',
   'add_task', 'add_category', 'add_project',
   'rename', 'delete', 'clear_all', 'set_weight',
   'annotate',                     // 给已有节点打/改策略标签
@@ -186,7 +186,7 @@ function resolveModel(mode, message, provider = 'deepseek') {
 
   // 4. 纯命令式（含明确操作动词 + 不带反思/推理词 + 不是问句）
   //    用"含有"而非"开头"，覆盖"在 X 下添加 Y"这种位置在中间的指令
-  const actionVerbs    = /(添加|加任务|加分类|新建|创建|删除|删掉|重命名|改名为|标记|做完了|完成了|暂停|搁置|清空|清除)/
+  const actionVerbs    = /(添加|加任务|加分类|新建|创建|删除|删掉|重命名|改名为|标记|做完了|完成了|暂停|搁置|废弃|放弃|取消|不做|砍掉|清空|清除)/
   const isQuestion     = /[?？]/.test(msg)
   if (actionVerbs.test(msg) && !isQuestion) {
     return chatModel
@@ -328,6 +328,7 @@ ${trimmedTree}
 { "type": "mark_done",    "id": "...", "name": "..." }
 { "type": "mark_active",  "id": "...", "name": "..." }
 { "type": "mark_dormant", "id": "...", "name": "..." }
+{ "type": "mark_dropped", "id": "...", "name": "..." }  // 废弃但保留在树上，不等于 delete
 { "type": "add_task",     "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }   // annotations 可选但鼓励；weight 不填时客户端会按同父级草案自动补齐
 { "type": "add_category", "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }
 { "type": "add_project",  "name": "...", "color": "#hex", "weight": 0.0-2.0, "annotations": {...} }  // weight 默认 1.0；非用户确认的权重方案不要主动设置
@@ -518,6 +519,9 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 
 输入: 「把求职项目暂停，先专注熊猫团团」，树中有 [project] 求职 (id:p-003) 及子任务 (t-008, t-009)
 输出: {"intent":"action","reply":"求职项目及子任务已暂停。","actions":[{"type":"mark_dormant","id":"p-003","name":"求职"},{"type":"mark_dormant","id":"t-008","name":"更新简历"},{"type":"mark_dormant","id":"t-009","name":"整理目标公司"}]}
+
+输入: 「把旧版剪辑方案废弃，先保留痕迹」，树中有 [task] 旧版剪辑方案 (id:t-210)
+输出: {"intent":"action","reply":"旧版剪辑方案已标记为废弃，节点会保留在树上。","actions":[{"type":"mark_dropped","id":"t-210","name":"旧版剪辑方案"}]}
 
 输入: 「把所有东西都清空」
 输出: {"intent":"action","reply":"已清空。（可撤销）","actions":[{"type":"clear_all"}]}
@@ -1046,7 +1050,7 @@ function validateOutput(data, nodeIdSet) {
       continue
     }
 
-    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'delete', 'rename', 'annotate', 'set_weight'].includes(a.type)
+    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'mark_dropped', 'delete', 'rename', 'annotate', 'set_weight'].includes(a.type)
     const needsName   = ['add_task', 'add_category', 'add_project', 'rename'].includes(a.type)
     const needsParent = ['add_task', 'add_category'].includes(a.type)
 
