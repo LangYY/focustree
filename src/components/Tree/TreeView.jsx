@@ -20,6 +20,9 @@ const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
 const ADD_CHILD_DRAG_MIN_X = 28
 const MIDDLE_MOUSE_BUTTON = 1
+const ZOOM_MIN = 0.15
+const ZOOM_MAX = 3
+const ZOOM_BUTTON_FACTOR = 1.15
 
 function shouldShowLabel(node, density) {
   const data = node?.data || node
@@ -111,6 +114,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const [contextMenu, setContextMenu] = useState(null)  // { x, y, node }
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
   const [editingNode, setEditingNode] = useState(null)  // { id, name, left, top, width }
+  const [zoomScale, setZoomScale] = useState(1)
   const dragRef      = useRef({})  // { node, startX, startY, dragging, sourceEl, pointerId }
   const suppressClickRef = useRef(false)
   const addDisabledRef = useRef(false)
@@ -191,6 +195,14 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     if (!svgRef.current || !zoomRef.current) return
     const svg = d3.select(svgRef.current)
     svg.transition().duration(400).call(zoomRef.current.transform, defaultTransformRef.current || d3.zoomIdentity)
+  }, [])
+
+  const zoomBy = useCallback((factor) => {
+    if (!svgRef.current || !zoomRef.current) return
+    const svgEl = svgRef.current
+    const svg = d3.select(svgEl)
+    const center = [svgEl.clientWidth / 2, svgEl.clientHeight / 2]
+    svg.transition().duration(180).call(zoomRef.current.scaleBy, factor, center)
   }, [])
 
   useEffect(() => {
@@ -458,7 +470,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const svg = d3.select(svgRef.current)
 
     const zoom = d3.zoom()
-      .scaleExtent([0.15, 3])
+      .scaleExtent([ZOOM_MIN, ZOOM_MAX])
+      .wheelDelta((event) => {
+        const modeScale = event.deltaMode === 1 ? 0.025 : event.deltaMode ? 0.5 : 0.00075
+        return -event.deltaY * modeScale
+      })
       .filter((event) => {
         // ✅ 仅允许：pinch 缩放（ctrlKey + wheel）+ 触摸屏 pinch
         // ❌ 禁止：mousedown / pointerdown 触发的拖拽平移
@@ -473,6 +489,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       })
       .on('zoom', (event) => {
         currentTransformRef.current = event.transform
+        setZoomScale(prev => Math.abs(prev - event.transform.k) > 0.005 ? event.transform.k : prev)
         d3.select(gRef.current).attr('transform', event.transform)
       })
 
@@ -986,6 +1003,34 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         <g ref={gRef} />
       </svg>
 
+      <div
+        className="absolute bottom-4 right-4 z-20 flex items-center overflow-hidden rounded-md border border-gray-700 bg-gray-950/92 shadow-xl backdrop-blur"
+        onMouseDown={event => event.stopPropagation()}
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <ZoomControlButton
+          label="-"
+          title="缩小"
+          disabled={zoomScale <= ZOOM_MIN * 1.01}
+          onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+        />
+        <div className="h-8 min-w-14 border-x border-gray-800 px-2 text-center text-[11px] leading-8 text-gray-400 tabular-nums">
+          {Math.round(zoomScale * 100)}%
+        </div>
+        <ZoomControlButton
+          label="+"
+          title="放大"
+          disabled={zoomScale >= ZOOM_MAX * 0.99}
+          onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+        />
+        <ZoomControlButton
+          label="1:1"
+          title="回到全局视图"
+          onClick={resetZoom}
+          wide
+        />
+      </div>
+
       {editingNode && (
         <input
           autoFocus
@@ -1032,5 +1077,23 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         />
       )}
     </div>
+  )
+}
+
+function ZoomControlButton({ label, title, disabled = false, onClick, wide = false }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onClick?.()
+      }}
+      className={`h-8 ${wide ? 'w-11' : 'w-8'} text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white disabled:cursor-not-allowed disabled:text-gray-700 disabled:hover:bg-transparent`}
+    >
+      {label}
+    </button>
   )
 }
