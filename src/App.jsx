@@ -232,6 +232,52 @@ export default function App() {
     }
   }, [updateStatus, guardedDeleteNode, updateWeight, treeData, createDefaultNode])
 
+  const deleteSelectedNode = useCallback(async () => {
+    if (!selectedNode || selectedNode.type === 'root') return
+    const hasChildren = selectedNode.children?.length > 0
+    const msg = hasChildren
+      ? `删除「${selectedNode.name}」及其所有子节点？此操作可撤销。`
+      : `删除「${selectedNode.name}」？此操作可撤销。`
+    if (!window.confirm(msg)) return
+    const nextSelection = selectedNode.parent_id || null
+    await guardedDeleteNode(selectedNode.id)
+    setSelectedNodeId(nextSelection)
+    setHighlightedNodeId(nextSelection)
+  }, [guardedDeleteNode, selectedNode])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (isTypingTarget(event.target) || event.defaultPrevented || authLoading || !user) return
+
+      const key = event.key
+      const mod = event.ctrlKey || event.metaKey
+
+      if (mod && key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          if (canRedo) redo()
+        } else if (canUndo) {
+          undo()
+        }
+        return
+      }
+
+      if (mod && key.toLowerCase() === 'y') {
+        event.preventDefault()
+        if (canRedo) redo()
+        return
+      }
+
+      if ((key === 'Delete' || key === 'Backspace') && selectedNode) {
+        event.preventDefault()
+        deleteSelectedNode()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [authLoading, canRedo, canUndo, deleteSelectedNode, redo, selectedNode, undo, user])
+
   // ── 新建节点 ────────────────────────────────────────
   const handleAddNode = useCallback(async ({ name, type, color, parentId }) => {
     await addNode({ name, type, color, parentId })
@@ -450,4 +496,9 @@ function findNodeInTree(tree, id) {
     if (found) return found
   }
   return null
+}
+
+function isTypingTarget(element) {
+  const tag = element?.tagName?.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || element?.isContentEditable
 }

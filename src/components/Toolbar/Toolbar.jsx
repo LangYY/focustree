@@ -63,7 +63,7 @@ export default function Toolbar({
             onClick={canUndo ? onUndo : undefined}
             onContextMenu={e => { e.preventDefault(); if (history?.length) setShowHistory(v => !v) }}
             disabled={!canUndo}
-            title={canUndo ? `撤销：${lastAction}（右键查看历史）` : '没有可撤销的操作'}
+            title={canUndo ? `撤销：${lastAction}（Ctrl/Cmd+Z，右键查看历史）` : '没有可撤销的操作'}
             className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border transition-colors ${
               canUndo
                 ? 'border-gray-600 text-gray-300 hover:bg-gray-800 cursor-pointer'
@@ -93,7 +93,7 @@ export default function Toolbar({
             onClick={canRedo ? onRedo : undefined}
             onContextMenu={e => { e.preventDefault(); if (future?.length) setShowFuture(v => !v) }}
             disabled={!canRedo}
-            title={canRedo ? `前进：${nextAction}（右键查看可前进操作）` : '没有可前进的操作'}
+            title={canRedo ? `前进：${nextAction}（Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y，右键查看可前进操作）` : '没有可前进的操作'}
             className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border transition-colors ${
               canRedo
                 ? 'border-gray-600 text-gray-300 hover:bg-gray-800 cursor-pointer'
