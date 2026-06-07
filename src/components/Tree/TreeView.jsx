@@ -19,6 +19,7 @@ const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
 const ADD_CHILD_DRAG_MIN_X = 28
+const MIDDLE_MOUSE_BUTTON = 1
 
 function shouldShowLabel(node, density) {
   const data = node?.data || node
@@ -104,6 +105,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const rootRef = useRef(null)   // 缓存 d3 hierarchy root，供高亮 effect 使用
   const treeDataRef = useRef(treeData)
   const autoCenteredRef = useRef(false)
+  const defaultTransformRef = useRef(d3.zoomIdentity)
+  const currentTransformRef = useRef(d3.zoomIdentity)
 
   const [contextMenu, setContextMenu] = useState(null)  // { x, y, node }
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
@@ -119,6 +122,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const onNodeToggleRef = useRef(onNodeToggle)
   const renameCancelledRef = useRef(false)
   const densityRef = useRef(density)
+  const canvasPanRef = useRef({})
   useEffect(() => { treeDataRef.current = treeData }, [treeData])
   useEffect(() => { densityRef.current = density }, [density])
   useEffect(() => { onDropRef.current = onDropBranch }, [onDropBranch])
@@ -186,7 +190,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const resetZoom = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return
     const svg = d3.select(svgRef.current)
-    svg.transition().duration(400).call(zoomRef.current.transform, d3.zoomIdentity)
+    svg.transition().duration(400).call(zoomRef.current.transform, defaultTransformRef.current || d3.zoomIdentity)
   }, [])
 
   useEffect(() => {
@@ -393,7 +397,14 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const offsetX = MARGIN.left - Math.min(...xs)
     const offsetY = (height - treeH) / 2 - minY + 30
     if (!autoCenteredRef.current) {
-      g.attr('transform', `translate(${offsetX},${offsetY})`)
+      const centeredTransform = d3.zoomIdentity.translate(offsetX, offsetY)
+      defaultTransformRef.current = centeredTransform
+      currentTransformRef.current = centeredTransform
+      if (svgRef.current && zoomRef.current) {
+        d3.select(svgRef.current).call(zoomRef.current.transform, centeredTransform)
+      } else {
+        g.attr('transform', centeredTransform)
+      }
       autoCenteredRef.current = true
     }
 
@@ -461,13 +472,15 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         return false
       })
       .on('zoom', (event) => {
+        currentTransformRef.current = event.transform
         d3.select(gRef.current).attr('transform', event.transform)
       })
 
     zoomRef.current = zoom
     svg.call(zoom)
+    svg.call(zoom.transform, currentTransformRef.current || d3.zoomIdentity)
 
-    // 二指滑动 / 鼠标滚轮（无 ctrlKey）→ 平移画布。这是唯一的平移途径。
+    // 二指滑动 / 鼠标滚轮（无 ctrlKey）→ 平移画布；中键拖拽在下方事件代理里处理。
     svg.on('wheel.pan', (event) => {
       if (event.ctrlKey) return  // pinch 由 d3.zoom 处理
       event.preventDefault()
@@ -585,6 +598,79 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const suppressPostDragClick = () => {
       suppressClickRef.current = true
       window.setTimeout(() => { suppressClickRef.current = false }, 180)
+    }
+
+    const startCanvasPan = (event) => {
+      if (event.button !== MIDDLE_MOUSE_BUTTON || !zoomRef.current) return false
+      if (canvasPanRef.current.active) return true
+
+      event.preventDefault()
+      event.stopPropagation()
+      window.getSelection?.()?.removeAllRanges?.()
+
+      const svg = d3.select(svgEl)
+      canvasPanRef.current = {
+        active: true,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        moved: false,
+        previousCursor: svgEl.style.cursor,
+        previousBodyUserSelect: document.body.style.userSelect,
+        previousBodyWebkitUserSelect: document.body.style.webkitUserSelect,
+      }
+      svgEl.style.cursor = 'grabbing'
+      document.body.style.userSelect = 'none'
+      document.body.style.webkitUserSelect = 'none'
+      setContextMenu(null)
+      setTooltip(null)
+
+      const cleanup = () => {
+        const state = canvasPanRef.current
+        document.removeEventListener('mousemove', onMove, listenerOptions)
+        document.removeEventListener('mouseup', onUp, listenerOptions)
+        window.removeEventListener('blur', onCancel)
+        svgEl.style.cursor = state.previousCursor || ''
+        if (state.previousBodyUserSelect !== undefined) {
+          document.body.style.userSelect = state.previousBodyUserSelect
+        }
+        if (state.previousBodyWebkitUserSelect !== undefined) {
+          document.body.style.webkitUserSelect = state.previousBodyWebkitUserSelect
+        }
+        canvasPanRef.current = {}
+      }
+
+      const onMove = (e) => {
+        const state = canvasPanRef.current
+        if (!state.active) return
+        e.preventDefault()
+        e.stopPropagation()
+
+        const dx = e.clientX - state.lastX
+        const dy = e.clientY - state.lastY
+        state.lastX = e.clientX
+        state.lastY = e.clientY
+        if (dx === 0 && dy === 0) return
+
+        state.moved = true
+        svg.call(zoomRef.current.translateBy, dx, dy)
+      }
+
+      const onUp = (e) => {
+        const moved = Boolean(canvasPanRef.current.moved)
+        cleanup()
+        e.preventDefault()
+        e.stopPropagation()
+        if (moved) suppressPostDragClick()
+      }
+
+      const onCancel = () => {
+        cleanup()
+      }
+
+      document.addEventListener('mousemove', onMove, listenerOptions)
+      document.addEventListener('mouseup', onUp, listenerOptions)
+      window.addEventListener('blur', onCancel)
+      return true
     }
 
     const startBranchDrag = (event, options) => {
@@ -848,12 +934,19 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     }
 
     const onMouseDown = (event) => {
+      if (startCanvasPan(event)) return
       startBranchDrag(event, {
         moveEvent: 'mousemove',
         upEvent: 'mouseup',
         pointerId: null,
         usePointerCapture: false,
       })
+    }
+
+    const onAuxClick = (event) => {
+      if (event.button !== MIDDLE_MOUSE_BUTTON) return
+      event.preventDefault()
+      event.stopPropagation()
     }
 
     const onClickCapture = (event) => {
@@ -865,10 +958,12 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const listenerOptions = { capture: true, passive: false }
     svgEl.addEventListener('pointerdown', onPointerDown, listenerOptions)
     svgEl.addEventListener('mousedown', onMouseDown, listenerOptions)
+    svgEl.addEventListener('auxclick', onAuxClick, listenerOptions)
     svgEl.addEventListener('click', onClickCapture, true)
     return () => {
       svgEl.removeEventListener('pointerdown', onPointerDown, listenerOptions)
       svgEl.removeEventListener('mousedown', onMouseDown, listenerOptions)
+      svgEl.removeEventListener('auxclick', onAuxClick, listenerOptions)
       svgEl.removeEventListener('click', onClickCapture, true)
     }
   }, [])
