@@ -18,8 +18,12 @@ import { useUserProfile } from './hooks/useUserProfile'
 import { useDailyFocus } from './hooks/useDailyFocus'
 import { useWeeklyReview } from './hooks/useWeeklyReview'
 import { useBackup } from './hooks/useBackup'
+import { getDerivedWeightMeta, getDerivedWeightMetaMap } from './lib/treeUtils'
 
 const DEFAULT_PROJECT_COLOR = '#4A8C5C'
+const DELETE_CONFIRM_SHARE = 0.7
+const DELETE_CONFIRM_DIRECT_CHILDREN = 3
+const DELETE_CONFIRM_DESCENDANTS = 6
 
 function defaultNodeName(type) {
   if (type === 'project') return '新项目'
@@ -103,27 +107,19 @@ export default function App() {
     return clearAll()
   }, [clearAll])
   const guardedDeleteNode = useCallback(async (nodeId) => {
-    // 删大子树前自动备份（≥ 3 个子节点视为"大"）
-    let isLarge = false
+    // 删粗壮/大子树前自动备份，普通小节点依赖撤销即可。
+    let shouldBackup = false
     try {
-      // 简单判断：找到节点并看有没有 children 数组
-      const queue = treeData ? [treeData] : []
-      while (queue.length) {
-        const n = queue.shift()
-        if (n.id === nodeId) {
-          isLarge = (n.children?.length || 0) >= 3
-          break
-        }
-        if (n.children) queue.push(...n.children)
-      }
+      const node = findNodeInTree(treeData, nodeId)
+      shouldBackup = getDeleteRisk(node, treeData, goal).shouldConfirm
     } catch { /* ignore */ }
-    if (isLarge) {
+    if (shouldBackup) {
       try {
         await backupRef.current?.preDestructiveBackup?.('删除子树前')
       } catch (e) { console.warn('[guardedDeleteNode] backup failed:', e) }
     }
     return deleteNode(nodeId)
-  }, [deleteNode, treeData])
+  }, [deleteNode, goal, treeData])
   const treeActions = {
     addNode, renameNode, updateStatus,
     deleteNode: guardedDeleteNode,
@@ -221,29 +217,19 @@ export default function App() {
       }
     }
     if (action === 'delete') {
-      const hasChildren = node.children?.length > 0
-      const msg = hasChildren
-        ? `删除「${node.name}」及其所有子节点？此操作不可撤销。`
-        : `删除「${node.name}」？此操作不可撤销。`
-      if (window.confirm(msg)) {
-        // guardedDeleteNode 已自动处理 pre-destructive 备份（≥3 子节点时）
-        await guardedDeleteNode(node.id)
-      }
+      if (!confirmRiskyDelete(node, treeData, goal)) return
+      await guardedDeleteNode(node.id)
     }
-  }, [updateStatus, guardedDeleteNode, updateWeight, treeData, createDefaultNode])
+  }, [updateStatus, guardedDeleteNode, updateWeight, treeData, goal, createDefaultNode])
 
   const deleteSelectedNode = useCallback(async () => {
     if (!selectedNode || selectedNode.type === 'root') return
-    const hasChildren = selectedNode.children?.length > 0
-    const msg = hasChildren
-      ? `删除「${selectedNode.name}」及其所有子节点？此操作可撤销。`
-      : `删除「${selectedNode.name}」？此操作可撤销。`
-    if (!window.confirm(msg)) return
+    if (!confirmRiskyDelete(selectedNode, treeData, goal)) return
     const nextSelection = selectedNode.parent_id || null
     await guardedDeleteNode(selectedNode.id)
     setSelectedNodeId(nextSelection)
     setHighlightedNodeId(nextSelection)
-  }, [guardedDeleteNode, selectedNode])
+  }, [goal, guardedDeleteNode, selectedNode, treeData])
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -496,6 +482,48 @@ function findNodeInTree(tree, id) {
     if (found) return found
   }
   return null
+}
+
+function confirmRiskyDelete(node, treeData, goal) {
+  const risk = getDeleteRisk(node, treeData, goal)
+  if (!risk.shouldConfirm) return true
+  return window.confirm(
+    `这是一个较大的分支：${risk.reasons.join('、')}。\n删除后可以撤销，确定删除「${node.name}」吗？`
+  )
+}
+
+function getDeleteRisk(node, treeData, goal) {
+  if (!node || node.type === 'root') return { shouldConfirm: false, reasons: [] }
+  const directChildren = node.children?.length || 0
+  const descendants = countDescendants(node)
+  const effectiveShare = readDeleteShare(node, treeData, goal)
+  const reasons = []
+  const canBeRiskyByShare = node.type !== 'task' || descendants > 0
+
+  if (canBeRiskyByShare && Number.isFinite(effectiveShare) && effectiveShare >= DELETE_CONFIRM_SHARE) {
+    reasons.push(`有效权重约 ${Math.round(effectiveShare * 100)}%`)
+  }
+  if (directChildren >= DELETE_CONFIRM_DIRECT_CHILDREN) {
+    reasons.push(`${directChildren} 个直属子节点`)
+  } else if (descendants >= DELETE_CONFIRM_DESCENDANTS) {
+    reasons.push(`${descendants} 个子孙节点`)
+  }
+
+  return { shouldConfirm: reasons.length > 0, reasons }
+}
+
+function readDeleteShare(node, treeData, goal) {
+  if (Number.isFinite(Number(node?.__flow))) return Number(node.__flow)
+  if (Number.isFinite(Number(node?.__localShare))) return Number(node.__localShare)
+  if (!treeData || !node?.id) return null
+  const metaById = getDerivedWeightMetaMap(treeData, { userGoal: goal })
+  const meta = getDerivedWeightMeta(metaById, node)
+  return Number.isFinite(Number(meta?.flow)) ? Number(meta.flow) : null
+}
+
+function countDescendants(node) {
+  if (!node?.children?.length) return 0
+  return node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0)
 }
 
 function isTypingTarget(element) {
