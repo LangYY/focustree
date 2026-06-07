@@ -1,4 +1,6 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+const AUTOSAVE_DELAY_MS = 1200
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '进行中' },
@@ -24,51 +26,92 @@ export default function NodeDetailPanel({
   const [title, setTitle] = useState(initialTitle)
   const [details, setDetails] = useState(initialDetails)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [savedSnapshot, setSavedSnapshot] = useState({
+    id: node?.id || null,
+    title: initialTitle,
+    details: initialDetails,
+  })
   const loadedRef = useRef({ id: node?.id || null, title: initialTitle, details: initialDetails })
+  const activeSavesRef = useRef(0)
 
-  const savedDetails = node?.annotations?.ai_notes || ''
-  const titleDirty = Boolean(node?.id) && title.trim() && title.trim() !== (node?.name || '')
-  const detailsDirty = Boolean(node?.id) && details !== savedDetails
+  const nodeId = node?.id || null
+  const nodeType = node?.type || null
+  const invalidTitle = Boolean(nodeId) && !title.trim()
+  const titleDirty = Boolean(nodeId && title.trim() && title.trim() !== savedSnapshot.title)
+  const detailsDirty = Boolean(nodeId) && details !== savedSnapshot.details
 
-  const saveTitle = useCallback(async () => {
-    if (!node?.id) return
-    const nextTitle = title.trim()
-    if (!nextTitle || nextTitle === node.name) return
+  const runSave = useCallback(async (task) => {
+    activeSavesRef.current += 1
     setSaving(true)
+    setSaveError('')
     try {
-      await onRenameNode?.(node.id, nextTitle)
+      await task()
+    } catch (error) {
+      console.warn('[NodeDetailPanel autosave]', error)
+      setSaveError('保存失败')
     } finally {
-      setSaving(false)
+      activeSavesRef.current = Math.max(0, activeSavesRef.current - 1)
+      if (activeSavesRef.current === 0) setSaving(false)
     }
-  }, [node, onRenameNode, title])
+  }, [])
 
-  const saveDetails = useCallback(async () => {
-    if (!node?.id) return
-    const nextDetails = details
-    if (nextDetails === savedDetails) return
-    setSaving(true)
-    try {
-      await onUpdateDetails?.(node.id, nextDetails)
-    } finally {
-      setSaving(false)
-    }
-  }, [details, node, onUpdateDetails, savedDetails])
+  const saveTitle = useCallback(async (value = title) => {
+    if (!nodeId) return
+    const nextTitle = String(value ?? '').trim()
+    if (!nextTitle || nextTitle === savedSnapshot.title) return
+    const currentNodeId = nodeId
+    await runSave(async () => {
+      await onRenameNode?.(currentNodeId, nextTitle)
+      setSavedSnapshot(prev => (
+        prev.id === currentNodeId ? { ...prev, title: nextTitle } : prev
+      ))
+      loadedRef.current = { ...loadedRef.current, id: currentNodeId, title: nextTitle }
+    })
+  }, [nodeId, onRenameNode, runSave, savedSnapshot.title, title])
+
+  const saveDetails = useCallback(async (value = details) => {
+    if (!nodeId) return
+    const nextDetails = String(value ?? '')
+    if (nextDetails === savedSnapshot.details) return
+    const currentNodeId = nodeId
+    await runSave(async () => {
+      await onUpdateDetails?.(currentNodeId, nextDetails)
+      setSavedSnapshot(prev => (
+        prev.id === currentNodeId ? { ...prev, details: nextDetails } : prev
+      ))
+      loadedRef.current = { ...loadedRef.current, id: currentNodeId, details: nextDetails }
+    })
+  }, [details, nodeId, onUpdateDetails, runSave, savedSnapshot.details])
 
   const saveAll = useCallback(async () => {
-    await saveTitle()
-    await saveDetails()
-  }, [saveDetails, saveTitle])
+    await saveTitle(title)
+    await saveDetails(details)
+  }, [details, saveDetails, saveTitle, title])
+
+  useEffect(() => {
+    if (!nodeId || nodeType === 'root') return
+    if (!titleDirty && !detailsDirty) return
+    const timer = window.setTimeout(() => {
+      if (titleDirty) saveTitle(title)
+      if (detailsDirty) saveDetails(details)
+    }, AUTOSAVE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [details, detailsDirty, nodeId, nodeType, saveDetails, saveTitle, title, titleDirty])
 
   if (!node || node.type === 'root') return null
 
   const canSave = titleDirty || detailsDirty
+  const saveStatus = saving
+    ? '保存中'
+    : saveError || (invalidTitle ? '标题不能为空' : (canSave ? '等待自动保存' : '已保存'))
 
   return (
     <aside className="w-[320px] min-w-[300px] max-w-[360px] border-l border-gray-800 bg-gray-950/98 text-gray-100 flex flex-col">
       <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
         <div>
           <div className="text-[11px] text-gray-500">{typeLabel(node.type)}详情</div>
-          <div className="text-xs text-gray-400">{saving ? '保存中' : canSave ? '有未保存修改' : '已保存'}</div>
+          <div className={`text-xs ${saveError || invalidTitle ? 'text-amber-400' : 'text-gray-400'}`}>{saveStatus}</div>
         </div>
         <button
           type="button"
@@ -84,17 +127,20 @@ export default function NodeDetailPanel({
         <label className="mb-2 block text-xs text-gray-400">标题</label>
         <input
           value={title}
-          onChange={event => setTitle(event.target.value)}
-          onBlur={saveTitle}
+          onChange={event => {
+            setSaveError('')
+            setTitle(event.target.value)
+          }}
+          onBlur={event => saveTitle(event.target.value)}
           onKeyDown={event => {
             if (event.key === 'Enter') {
               event.preventDefault()
-              saveTitle()
+              saveTitle(event.currentTarget.value)
               event.currentTarget.blur()
             }
             if (event.key === 'Escape') {
               event.preventDefault()
-              setTitle(node.name || '')
+              setTitle(savedSnapshot.title)
               event.currentTarget.blur()
             }
           }}
@@ -124,8 +170,11 @@ export default function NodeDetailPanel({
         <label className="mb-2 block text-xs text-gray-400">详细想法</label>
         <textarea
           value={details}
-          onChange={event => setDetails(event.target.value)}
-          onBlur={saveDetails}
+          onChange={event => {
+            setSaveError('')
+            setDetails(event.target.value)
+          }}
+          onBlur={event => saveDetails(event.target.value)}
           onKeyDown={event => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
               event.preventDefault()
@@ -133,24 +182,13 @@ export default function NodeDetailPanel({
             }
             if (event.key === 'Escape') {
               event.preventDefault()
-              setDetails(loadedRef.current.id === node.id ? loadedRef.current.details : savedDetails)
+              setDetails(savedSnapshot.details)
               event.currentTarget.blur()
             }
           }}
           placeholder="补充背景、判断、卡点、下一步，或者这个步骤为什么重要。"
           className="min-h-[220px] w-full resize-y rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm leading-6 text-gray-100 outline-none focus:border-blue-500"
         />
-      </div>
-
-      <div className="border-t border-gray-800 px-4 py-3">
-        <button
-          type="button"
-          onClick={saveAll}
-          disabled={!canSave || saving}
-          className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-500"
-        >
-          保存
-        </button>
       </div>
     </aside>
   )

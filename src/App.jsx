@@ -376,11 +376,7 @@ export default function App() {
 
         {/* 对话面板 */}
         <NodeDetailPanel
-          key={[
-            selectedNode?.id || 'empty',
-            selectedNode?.updated_at || '',
-            selectedNode?.annotations?.updated_at || '',
-          ].join(':')}
+          key={selectedNode?.id || 'empty'}
           node={selectedNode}
           onClose={() => setSelectedNodeId(null)}
           onRenameNode={renameNode}
