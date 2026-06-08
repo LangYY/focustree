@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { PRIORITY_OPTIONS, getNodeDueState } from '../../lib/treeUtils'
 
 const AUTOSAVE_DELAY_MS = 1200
 
@@ -19,20 +20,33 @@ export default function NodeDetailPanel({
   onClose,
   onRenameNode,
   onUpdateDetails,
+  onUpdatePlanning,
   onStatusChange,
 }) {
   const initialTitle = node?.name || ''
   const initialDetails = node?.annotations?.ai_notes || ''
+  const initialPriority = node?.current_priority || ''
+  const initialTargetDate = node?.target_completion_date || ''
   const [title, setTitle] = useState(initialTitle)
   const [details, setDetails] = useState(initialDetails)
+  const [priority, setPriority] = useState(initialPriority)
+  const [targetDate, setTargetDate] = useState(initialTargetDate)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [savedSnapshot, setSavedSnapshot] = useState({
     id: node?.id || null,
     title: initialTitle,
     details: initialDetails,
+    priority: initialPriority,
+    targetDate: initialTargetDate,
   })
-  const loadedRef = useRef({ id: node?.id || null, title: initialTitle, details: initialDetails })
+  const loadedRef = useRef({
+    id: node?.id || null,
+    title: initialTitle,
+    details: initialDetails,
+    priority: initialPriority,
+    targetDate: initialTargetDate,
+  })
   const activeSavesRef = useRef(0)
 
   const nodeId = node?.id || null
@@ -40,6 +54,8 @@ export default function NodeDetailPanel({
   const invalidTitle = Boolean(nodeId) && !title.trim()
   const titleDirty = Boolean(nodeId && title.trim() && title.trim() !== savedSnapshot.title)
   const detailsDirty = Boolean(nodeId) && details !== savedSnapshot.details
+  const planningDirty = Boolean(nodeId) &&
+    (priority !== savedSnapshot.priority || targetDate !== savedSnapshot.targetDate)
 
   const runSave = useCallback(async (task) => {
     activeSavesRef.current += 1
@@ -84,10 +100,45 @@ export default function NodeDetailPanel({
     })
   }, [details, nodeId, onUpdateDetails, runSave, savedSnapshot.details])
 
+  const savePlanning = useCallback(async (next = {}) => {
+    if (!nodeId) return
+    const nextPriority = Object.prototype.hasOwnProperty.call(next, 'priority')
+      ? (next.priority || '')
+      : priority
+    const nextTargetDate = Object.prototype.hasOwnProperty.call(next, 'targetDate')
+      ? (next.targetDate || '')
+      : targetDate
+    const payload = {}
+    if (nextPriority !== savedSnapshot.priority) {
+      payload.current_priority = nextPriority || null
+    }
+    if (nextTargetDate !== savedSnapshot.targetDate) {
+      payload.target_completion_date = nextTargetDate || null
+    }
+    if (!Object.keys(payload).length) return
+
+    const currentNodeId = nodeId
+    await runSave(async () => {
+      await onUpdatePlanning?.(currentNodeId, payload)
+      setSavedSnapshot(prev => (
+        prev.id === currentNodeId
+          ? { ...prev, priority: nextPriority, targetDate: nextTargetDate }
+          : prev
+      ))
+      loadedRef.current = {
+        ...loadedRef.current,
+        id: currentNodeId,
+        priority: nextPriority,
+        targetDate: nextTargetDate,
+      }
+    })
+  }, [nodeId, onUpdatePlanning, priority, runSave, savedSnapshot.priority, savedSnapshot.targetDate, targetDate])
+
   const saveAll = useCallback(async () => {
     await saveTitle(title)
     await saveDetails(details)
-  }, [details, saveDetails, saveTitle, title])
+    await savePlanning()
+  }, [details, saveDetails, savePlanning, saveTitle, title])
 
   useEffect(() => {
     if (!nodeId || nodeType === 'root') return
@@ -102,9 +153,10 @@ export default function NodeDetailPanel({
   if (!node || node.type === 'root') return null
 
   const canSave = titleDirty || detailsDirty
+  const dueState = getNodeDueState({ ...node, target_completion_date: targetDate })
   const saveStatus = saving
     ? '保存中'
-    : saveError || (invalidTitle ? '标题不能为空' : (canSave ? '等待自动保存' : '已保存'))
+    : saveError || (invalidTitle ? '标题不能为空' : (canSave || planningDirty ? '等待自动保存' : '已保存'))
 
   return (
     <aside className="w-[320px] min-w-[300px] max-w-[360px] border-l border-gray-800 bg-gray-950/98 text-gray-100 flex flex-col">
@@ -165,6 +217,61 @@ export default function NodeDetailPanel({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="mb-4">
+          <div className="mb-2 text-xs text-gray-400">当下优先级</div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {PRIORITY_OPTIONS.map(option => {
+              const value = option.value || ''
+              const active = priority === value
+              return (
+                <button
+                  key={value || 'none'}
+                  type="button"
+                  onClick={() => {
+                    setSaveError('')
+                    setPriority(value)
+                    savePlanning({ priority: value })
+                  }}
+                  className={`rounded-md border px-1.5 py-1.5 text-xs transition-colors ${
+                    active
+                      ? value === 'urgent'
+                        ? 'border-white/70 bg-white/10 text-white shadow-[0_0_12px_rgba(255,255,255,0.12)]'
+                        : 'border-blue-500 bg-blue-600/20 text-blue-100'
+                      : 'border-gray-800 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-100'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <div className="mb-2 flex items-center justify-between">
+            <label htmlFor="node-target-date" className="text-xs text-gray-400">目标完成日期</label>
+            {dueState?.state && dueState.state !== 'later' && (
+              <span className={`text-[11px] ${
+                dueState.state === 'overdue' ? 'text-red-300' : 'text-amber-300'
+              }`}>
+                {dueState.label}
+              </span>
+            )}
+          </div>
+          <input
+            id="node-target-date"
+            type="date"
+            value={targetDate}
+            onChange={event => {
+              const value = event.target.value
+              setSaveError('')
+              setTargetDate(value)
+              savePlanning({ targetDate: value })
+            }}
+            className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          />
         </div>
 
         <label className="mb-2 block text-xs text-gray-400">详细想法</label>

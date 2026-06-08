@@ -1,4 +1,4 @@
-import { computeTreeNodeMetaMap, flattenTree, findNodeById, getDerivedWeightMeta } from './treeUtils.js'
+import { computeTreeNodeMetaMap, flattenTree, findNodeById, getDerivedWeightMeta, getNodeDueState, PRIORITY_LABELS } from './treeUtils.js'
 
 const MODEL_JUDGMENT_WORDS = /(应该|建议|推荐|优先|先做什么|先做哪|取舍|规划|梳理|分析|判断|值不值得|要不要|是否|为什么|怎么|如何|帮我想|帮我拆|卡住)/
 const ACTIVE_STATUS = { active: '进行中', done: '已完成', dormant: '已暂停' }
@@ -100,6 +100,11 @@ function buildSelectedNodeReply(treeData, node) {
   ]
 
   if (parent) lines.push(`父节点：${parent.name}`)
+  if (node.current_priority) lines.push(`当下优先级：${PRIORITY_LABELS[node.current_priority] || node.current_priority}`)
+  if (node.target_completion_date) {
+    const dueState = getNodeDueState(node)
+    lines.push(`目标完成日期：${node.target_completion_date}${dueState ? `（${dueState.label}）` : ''}`)
+  }
   lines.push(`直属子节点：${children.length} 个（进行中 ${activeChildren}，已完成 ${doneChildren}）`)
   if (details) lines.push(`详情：${details.slice(0, 280)}${details.length > 280 ? '...' : ''}`)
   if (children.length) {
@@ -125,7 +130,7 @@ function buildTimeTaskReply(treeData, text, userGoal) {
       : '本周 / deadline 相关任务'
 
   if (!candidates.length) {
-    return `${title}：我没有在任务名或详情里找到明确时间线索。\n说明：当前还没有专门的截止日期栏位，本地算法只能按“今天/明天/本周/截止/deadline”等文字和时间标签筛选。`
+    return `${title}：我没有找到匹配的目标完成日期，也没有在任务名或详情里找到明确时间线索。`
   }
 
   return [
@@ -178,13 +183,17 @@ function rankOpenTasks(treeData, userGoal) {
 
 function matchesTimeIntent(node, mode, rawText) {
   const text = nodeText(node)
+  const dueState = getNodeDueState(node)
   if (mode === 'today') {
+    if (dueState && dueState.days <= 0) return true
     return /今天|今日|立刻|马上|现在|今晚/.test(text) || node.annotations?.time_horizon === '立即'
   }
   if (mode === 'tomorrow') {
+    if (dueState?.days === 1) return true
     return /明天|明日/.test(text)
   }
-  return /本周|这周|周内|本月底|月底|月内|deadline|截止|到期|交付|提交|答辩/i.test(text) ||
+  return (dueState && dueState.days <= 7) ||
+    /本周|这周|周内|本月底|月底|月内|deadline|截止|到期|交付|提交|答辩/i.test(text) ||
     ['立即', '短期'].includes(node.annotations?.time_horizon) ||
     /deadline|截止|到期/i.test(rawText)
 }
@@ -193,7 +202,14 @@ function formatTaskLines(items) {
   return items.map((item, index) => {
     const meta = item.meta
     const score = meta ? `，匹配度 ${Math.round(meta.recommendationRank * 100)}%` : ''
-    return `${index + 1}. ${item.path || item.node.name}（${ACTIVE_STATUS[item.node.status] || item.node.status || '进行中'}${score}）`
+    const priority = item.node.current_priority
+      ? `，优先级 ${PRIORITY_LABELS[item.node.current_priority] || item.node.current_priority}`
+      : ''
+    const dueState = getNodeDueState(item.node)
+    const due = item.node.target_completion_date
+      ? `，${dueState?.label || item.node.target_completion_date}`
+      : ''
+    return `${index + 1}. ${item.path || item.node.name}（${ACTIVE_STATUS[item.node.status] || item.node.status || '进行中'}${priority}${due}${score}）`
   })
 }
 
@@ -201,6 +217,8 @@ function nodeText(node) {
   const annotations = node.annotations || {}
   return [
     node.name,
+    node.current_priority ? PRIORITY_LABELS[node.current_priority] || node.current_priority : null,
+    node.target_completion_date,
     annotations.ai_notes,
     annotations.time_horizon,
     annotations.energy_cost,

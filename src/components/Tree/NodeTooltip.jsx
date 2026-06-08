@@ -1,3 +1,5 @@
+import { PRIORITY_LABELS, getNodeDueState } from '../../lib/treeUtils'
+
 const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
 
@@ -18,6 +20,8 @@ export default function NodeTooltip({ x, y, node }) {
   const rankPct = Math.round(safeRatio(node.__recommendationRank ?? 0, 0) * 100)
   const pressure = Number(node.__branchPressure)
   const missingSlots = Array.isArray(node.__missingSlots) ? node.__missingSlots : []
+  const priorityLabel = PRIORITY_LABELS[node.current_priority] || ''
+  const dueState = getNodeDueState(node)
 
   const style = {
     position: 'fixed',
@@ -59,6 +63,18 @@ export default function NodeTooltip({ x, y, node }) {
       <div className="text-gray-500 mt-0.5">
         完整度 {completenessPct}% · 推荐分 {rankPct}%
       </div>
+
+      {(priorityLabel || node.target_completion_date) && (
+        <div className="text-gray-500 mt-0.5">
+          {priorityLabel && <span>优先级 {priorityLabel}</span>}
+          {priorityLabel && node.target_completion_date && <span className="text-gray-700"> · </span>}
+          {node.target_completion_date && (
+            <span className={dueState?.state && dueState.state !== 'later' ? 'text-amber-300/90' : ''}>
+              {dueState?.label || node.target_completion_date}
+            </span>
+          )}
+        </div>
+      )}
 
       {Number.isFinite(pressure) && (
         <div className="text-gray-600 mt-0.5">

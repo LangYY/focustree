@@ -1,6 +1,16 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { flatToTree, findNodeById, collectSubtree, sortByParentFirst, sortByDepthDesc, flattenTree, SAMPLE_DATA } from '../lib/treeUtils'
+import {
+  flatToTree,
+  findNodeById,
+  collectSubtree,
+  sortByParentFirst,
+  sortByDepthDesc,
+  flattenTree,
+  normalizeCurrentPriority,
+  normalizeTargetCompletionDate,
+  SAMPLE_DATA,
+} from '../lib/treeUtils'
 
 const MAX_HISTORY = 30
 
@@ -230,9 +240,11 @@ export function useTree(user) {
 
   // ── 新增节点（可带 AI 自动生成的 annotations）────────
 
-  const addNode = useCallback(async ({ name, type, parentId, color, annotations, weight }) => {
+  const addNode = useCallback(async ({ name, type, parentId, color, annotations, weight, current_priority, target_completion_date }) => {
     if (!user) return
     const nodeWeight = typeof weight === 'number' ? Math.max(0, Math.min(2, weight)) : 1.0
+    const nodePriority = normalizeCurrentPriority(current_priority)
+    const nodeTargetDate = normalizeTargetCompletionDate(target_completion_date)
     const insertPayload = {
       user_id: user.id,
       parent_id: parentId || null,
@@ -242,6 +254,8 @@ export function useTree(user) {
       expanded: true, position: Date.now(),
       last_active_at: new Date().toISOString(),
     }
+    if (nodePriority) insertPayload.current_priority = nodePriority
+    if (nodeTargetDate) insertPayload.target_completion_date = nodeTargetDate
     const { data, error: insertErr } = await supabase.from('nodes').insert(insertPayload).select('id').single()
 
     if (insertErr) {
@@ -386,6 +400,98 @@ export function useTree(user) {
     })
 
     setTreeData(prev => removeNodeFromTree(prev, nodeId))
+  }, [user, treeData, pushHistory])
+
+  const deleteNodeOnly = useCallback(async (nodeId) => {
+    if (!user) return
+    const node = findNodeById(treeData, nodeId)
+    if (!node || node.type === 'root' || !node.children?.length) return
+
+    const parentId = node.parent_id || null
+    const directChildren = [...(node.children || [])]
+    const childIds = new Set(directChildren.map(child => child.id))
+    const siblings = getSiblingNodes(treeData, parentId)
+    const prevSiblingPositions = siblings.map(sibling => ({
+      id: sibling.id,
+      position: sibling.position ?? 0,
+    }))
+    const childSnapshots = directChildren.map(child => ({
+      id: child.id,
+      parent_id: child.parent_id || null,
+      position: child.position ?? 0,
+    }))
+    const nextOrderIds = []
+    siblings.forEach(sibling => {
+      if (sibling.id === nodeId) {
+        directChildren.forEach(child => nextOrderIds.push(child.id))
+      } else {
+        nextOrderIds.push(sibling.id)
+      }
+    })
+    const nextPositions = nextOrderIds.map((id, index) => ({
+      id,
+      position: (index + 1) * 1000,
+    }))
+    const treeBefore = treeData
+    const treeAfter = deleteNodeOnlyFromTree(treeData, nodeId, nextPositions)
+
+    const applyDeleteOnly = async () => {
+      const updates = nextPositions.map(item => {
+        const payload = { position: item.position }
+        if (childIds.has(item.id)) payload.parent_id = parentId
+        return supabase
+          .from('nodes')
+          .update(payload)
+          .eq('id', item.id)
+          .eq('user_id', user.id)
+      })
+      const updateResults = await Promise.all(updates)
+      const firstUpdateError = updateResults.find(result => result.error)?.error
+      if (firstUpdateError) return firstUpdateError
+
+      const { error: deleteError } = await supabase
+        .from('nodes')
+        .delete()
+        .eq('id', nodeId)
+        .eq('user_id', user.id)
+      return deleteError || null
+    }
+
+    const restoreDeletedNode = async () => {
+      await supabase.from('nodes').insert(stripRuntimeNodeFields(node))
+      await restoreAnnotations([node], user.id)
+      await Promise.all(childSnapshots.map(child =>
+        supabase
+          .from('nodes')
+          .update({ parent_id: child.parent_id, position: child.position })
+          .eq('id', child.id)
+          .eq('user_id', user.id)
+      ))
+      await Promise.all(prevSiblingPositions.map(item =>
+        supabase
+          .from('nodes')
+          .update({ position: item.position })
+          .eq('id', item.id)
+          .eq('user_id', user.id)
+      ))
+    }
+
+    const error = await applyDeleteOnly()
+    if (error) {
+      console.error('[deleteNodeOnly]', error.message)
+      alert(`删除当前节点失败：${error.message}`)
+      return
+    }
+
+    pushHistory(`只删除「${node.name}」`, async () => {
+      await restoreDeletedNode()
+      setTreeData(treeBefore)
+    }, async () => {
+      await applyDeleteOnly()
+      setTreeData(treeAfter)
+    })
+
+    setTreeData(treeAfter)
   }, [user, treeData, pushHistory])
 
   // ── 移动节点到另一父节点 ──────────────────────────────
@@ -582,11 +688,65 @@ export function useTree(user) {
     })
   }, [user, treeData, pushHistory])
 
+  const updateNodePlanning = useCallback(async (nodeId, fields) => {
+    if (!user || !nodeId || !fields) return
+    const node = findNodeById(treeData, nodeId)
+    if (!node || node.type === 'root') return
+
+    const nextFields = {}
+    if (Object.prototype.hasOwnProperty.call(fields, 'current_priority')) {
+      nextFields.current_priority = normalizeCurrentPriority(fields.current_priority)
+    }
+    if (Object.prototype.hasOwnProperty.call(fields, 'target_completion_date')) {
+      nextFields.target_completion_date = normalizeTargetCompletionDate(fields.target_completion_date)
+    }
+    const changedKeys = Object.keys(nextFields)
+      .filter(key => (node[key] || null) !== (nextFields[key] || null))
+    if (!changedKeys.length) return
+
+    const prevFields = Object.fromEntries(changedKeys.map(key => [key, node[key] || null]))
+    const changedFields = Object.fromEntries(changedKeys.map(key => [key, nextFields[key]]))
+    const nowIso = new Date().toISOString()
+
+    setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, {
+      ...changedFields,
+      last_active_at: nowIso,
+    }) : prev)
+
+    const { error } = await supabase
+      .from('nodes')
+      .update({
+        ...changedFields,
+        last_active_at: nowIso,
+      })
+      .eq('id', nodeId)
+      .eq('user_id', user.id)
+
+    if (error) {
+      console.error('[updateNodePlanning]', error.message)
+      alert(`规划信息保存失败：${error.message}`)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, prevFields) : prev)
+      throw error
+    }
+
+    const label = changedKeys.includes('target_completion_date') && changedKeys.includes('current_priority')
+      ? '规划信息'
+      : changedKeys.includes('target_completion_date') ? '目标日期' : '优先级'
+
+    pushHistory(`更新「${node.name}」${label}`, async () => {
+      await supabase.from('nodes').update(prevFields).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, prevFields) : prev)
+    }, async () => {
+      await supabase.from('nodes').update(changedFields).eq('id', nodeId).eq('user_id', user.id)
+      setTreeData(prev => prev ? updateNodeFieldsInTree(prev, nodeId, changedFields) : prev)
+    })
+  }, [user, treeData, pushHistory])
+
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, updateWeight, moveNode, reorderNode,
-    annotateNode, updateNodeDetails,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, updateWeight, moveNode, reorderNode,
+    annotateNode, updateNodeDetails, updateNodePlanning,
     reload: loadNodes,
     // 历史
     history,
@@ -685,6 +845,44 @@ function removeNodeFromTree(tree, nodeId) {
       .map(child => removeNodeFromTree(child, nodeId))
       .filter(Boolean),
   }
+}
+
+function deleteNodeOnlyFromTree(tree, nodeId, orderedPositions = []) {
+  if (!tree || !nodeId) return tree
+  const positionById = new Map(orderedPositions.map(item => [item.id, item.position]))
+
+  function walk(node) {
+    if (!node.children?.length) return node
+    const nextChildren = []
+    let changed = false
+
+    for (const child of node.children) {
+      if (child.id === nodeId) {
+        changed = true
+        const promotedChildren = (child.children || []).map(grandchild => ({
+          ...grandchild,
+          parent_id: node.id === 'root' ? null : node.id,
+          position: positionById.get(grandchild.id) ?? grandchild.position,
+        }))
+        nextChildren.push(...promotedChildren)
+      } else {
+        const nextChild = walk(child)
+        const positionedChild = positionById.has(nextChild.id)
+          ? { ...nextChild, position: positionById.get(nextChild.id) }
+          : nextChild
+        if (positionedChild !== child) changed = true
+        nextChildren.push(positionedChild)
+      }
+    }
+
+    if (!changed) return node
+    return {
+      ...node,
+      children: nextChildren.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    }
+  }
+
+  return walk(tree)
 }
 
 /**

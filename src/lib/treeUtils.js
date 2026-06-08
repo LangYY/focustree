@@ -68,7 +68,8 @@ export function collectSubtree(tree, nodeId) {
   if (!node) return []
   const result = []
   function walk(n) {
-    const { children, ...raw } = n   // 去掉运行时的 children 数组
+    const raw = { ...n }
+    delete raw.children
     result.push(raw)
     n.children?.forEach(walk)
   }
@@ -123,6 +124,54 @@ export function getNodeRadius(type) {
   if (type === 'project') return 18
   if (type === 'category') return 11
   return 6
+}
+
+export const PRIORITY_OPTIONS = [
+  { value: null, label: '未设定' },
+  { value: 'low', label: '低' },
+  { value: 'normal', label: '普通' },
+  { value: 'high', label: '高' },
+  { value: 'urgent', label: '紧急' },
+]
+
+export const PRIORITY_LABELS = {
+  low: '低',
+  normal: '普通',
+  high: '高',
+  urgent: '紧急',
+}
+
+export function normalizeCurrentPriority(value) {
+  if (value === null || value === undefined || value === '') return null
+  const normalized = String(value).trim()
+  return PRIORITY_LABELS[normalized] ? normalized : null
+}
+
+export function normalizeTargetCompletionDate(value) {
+  if (value === null || value === undefined || value === '') return null
+  const text = String(value).trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
+  return Number.isNaN(new Date(`${text}T00:00:00`).getTime()) ? null : text
+}
+
+export function getNodeDueState(node, now = new Date()) {
+  if (!node || node.status === 'done') return null
+  const targetDate = normalizeTargetCompletionDate(node.target_completion_date)
+  if (!targetDate) return null
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const due = new Date(`${targetDate}T00:00:00`)
+  const days = Math.round((due.getTime() - today.getTime()) / 86400000)
+
+  if (days < 0) return { state: 'overdue', days, label: `逾期 ${Math.abs(days)} 天` }
+  if (days === 0) return { state: 'today', days, label: '今天到期' }
+  if (days <= 3) return { state: 'three_days', days, label: `${days} 天内` }
+  if (days <= 7) return { state: 'week', days, label: `${days} 天内` }
+  return { state: 'later', days, label: targetDate }
+}
+
+export function isUrgentPriority(value) {
+  return normalizeCurrentPriority(value) === 'urgent'
 }
 
 export function getNodeColor(node) {
@@ -192,6 +241,8 @@ function nodeTextOf(node) {
   return [
     node?.name,
     node?.summary,
+    node?.current_priority ? PRIORITY_LABELS[node.current_priority] || node.current_priority : null,
+    node?.target_completion_date,
     a.strategic_tag,
     a.time_horizon,
     a.energy_cost,
@@ -260,6 +311,16 @@ function urgencyScore(node) {
   const a = node?.annotations || {}
   let score = 0
 
+  if (node?.current_priority === 'urgent') score += 0.9
+  if (node?.current_priority === 'high') score += 0.55
+  if (node?.current_priority === 'normal') score += 0.18
+
+  const dueState = getNodeDueState(node)
+  if (dueState?.state === 'overdue') score += 0.85
+  if (dueState?.state === 'today') score += 0.75
+  if (dueState?.state === 'three_days') score += 0.55
+  if (dueState?.state === 'week') score += 0.28
+
   if (a.time_horizon === '立即') score += 0.8
   if (a.time_horizon === '短期') score += 0.45
   if (a.time_horizon === '中期') score += 0.18
@@ -294,7 +355,7 @@ function completenessFor(node, childMetas) {
 
   const children = Array.isArray(node.children) ? node.children : []
   const missingSlots = []
-  let score = 0
+  let score
 
   if (node.type === 'task') {
     score = taskSpecificity(node)
@@ -519,12 +580,13 @@ export function treeToPromptText(tree, userGoal = null) {
 
   function annoTag(node) {
     const a = node.annotations
-    if (!a) return ''
     const parts = []
-    if (a.strategic_tag) parts.push(a.strategic_tag)
-    if (a.time_horizon)  parts.push(a.time_horizon)
-    if (a.energy_cost)   parts.push(a.energy_cost)
-    if (a.risk)          parts.push(a.risk)
+    if (node.current_priority) parts.push(`优先级:${PRIORITY_LABELS[node.current_priority] || node.current_priority}`)
+    if (node.target_completion_date) parts.push(`目标日期:${node.target_completion_date}`)
+    if (a?.strategic_tag) parts.push(a.strategic_tag)
+    if (a?.time_horizon)  parts.push(a.time_horizon)
+    if (a?.energy_cost)   parts.push(a.energy_cost)
+    if (a?.risk)          parts.push(a.risk)
     return parts.length ? ` 〔${parts.join('·')}〕` : ''
   }
 

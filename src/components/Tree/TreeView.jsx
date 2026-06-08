@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
 import {
   getNodeRadius,
-  getNodeColor,
   getLinkStrokeWidth,
   findNodeById,
   getDerivedWeightMetaMap,
   getDerivedWeightMeta,
+  getNodeDueState,
+  isUrgentPriority,
 } from '../../lib/treeUtils'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
@@ -24,6 +25,18 @@ const MIDDLE_MOUSE_BUTTON = 1
 const ZOOM_MIN = 0.15
 const ZOOM_MAX = 3
 const ZOOM_BUTTON_FACTOR = 1.15
+const DEFAULT_PROJECT_COLOR = '#4A8C5C'
+const BRANCH_PALETTE = [
+  '#ef4444',
+  '#8b5cf6',
+  '#f97316',
+  '#0ea5e9',
+  '#22c55e',
+  '#eab308',
+  '#ec4899',
+  '#14b8a6',
+  '#64748b',
+]
 
 function shouldShowLabel(node, density) {
   const data = node?.data || node
@@ -68,6 +81,68 @@ function countDescendants(node) {
   return n
 }
 
+function clampNumber(value, min, max) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return min
+  return Math.max(min, Math.min(max, numeric))
+}
+
+function isDefaultProjectColor(color) {
+  return String(color || '').trim().toLowerCase() === DEFAULT_PROJECT_COLOR.toLowerCase()
+}
+
+function resolveBranchBaseColor(hNode, index) {
+  const stored = String(hNode?.data?.color || '').trim()
+  if (stored && !isDefaultProjectColor(stored)) return stored
+  return BRANCH_PALETTE[index % BRANCH_PALETTE.length]
+}
+
+function shadeBranchColor(baseColor, depth, status) {
+  const color = d3.hsl(baseColor || '#64748b')
+  const fallback = d3.hsl('#64748b')
+  const hue = Number.isFinite(color.h) ? color.h : fallback.h
+  const sourceSaturation = Number.isFinite(color.s) ? color.s : fallback.s
+  const sourceLightness = Number.isFinite(color.l) ? color.l : fallback.l
+  const depthStep = Math.min(depth, 5)
+  const saturation = clampNumber(sourceSaturation * (0.95 - depthStep * 0.035), 0.42, 0.9)
+  let lightness = clampNumber(sourceLightness + depthStep * 0.055, 0.44, 0.76)
+  let nextSaturation = saturation
+
+  if (status === 'done') {
+    nextSaturation *= 0.42
+    lightness = clampNumber(lightness * 0.9, 0.34, 0.66)
+  } else if (status === 'dormant') {
+    nextSaturation *= 0.32
+    lightness = clampNumber(lightness * 0.82, 0.32, 0.58)
+  }
+
+  return d3.hsl(hue, nextSaturation, lightness).formatHex()
+}
+
+function isVisibleDueState(dueState) {
+  return dueState && ['overdue', 'today', 'three_days', 'week'].includes(dueState.state)
+}
+
+function assignBranchVisuals(root) {
+  const rootBranches = root.children || []
+
+  function walk(node, baseColor, branchDepth) {
+    const dueState = getNodeDueState(node.data)
+    node.__branchBaseColor = baseColor
+    node.__branchDepth = branchDepth
+    node.__displayColor = shadeBranchColor(baseColor, branchDepth, node.data.status)
+    node.__visualOpacity = node.data.status === 'done' ? 0.58 : node.data.status === 'dormant' ? 0.46 : 1
+    node.__dueState = dueState
+    node.__dueVisible = isVisibleDueState(dueState)
+    node.__isUrgent = isUrgentPriority(node.data.current_priority)
+    ;(node.children || []).forEach(child => walk(child, baseColor, branchDepth + 1))
+  }
+
+  rootBranches.forEach((branch, index) => {
+    walk(branch, resolveBranchBaseColor(branch, index), 0)
+  })
+}
+
 function assignCumulativeFlow(root, userGoal) {
   const metaById = getDerivedWeightMetaMap(root.data, { userGoal })
   root.eachBefore(node => {
@@ -84,13 +159,60 @@ function assignCumulativeFlow(root, userGoal) {
 }
 
 function linkStrokeWidth(d) {
-  return getLinkStrokeWidth(d?.target?.__flow)
+  const target = d?.target
+  let extra = 0
+  if (target?.__isUrgent) extra += 1.5
+  else if (target?.data?.current_priority === 'high') extra += 0.7
+  if (target?.__dueState?.state === 'overdue' || target?.__dueState?.state === 'today') extra += 0.8
+  else if (target?.__dueState?.state === 'three_days') extra += 0.45
+  return getLinkStrokeWidth(target?.__flow) + extra
 }
 
 function applyLinkStrokeWidth(selection, extra = 0) {
   selection
     .attr('stroke-width', d => linkStrokeWidth(d) + extra)
     .style('stroke-width', d => `${linkStrokeWidth(d) + extra}px`)
+}
+
+function linkOpacity(d) {
+  const opacity = d?.target?.__visualOpacity ?? 1
+  const boosted = d?.target?.__isUrgent || d?.target?.__dueVisible ? 0.72 : 0.48
+  return clampNumber(opacity * boosted, 0.22, 0.86)
+}
+
+function nodeStrokeColor(d) {
+  if (d?.__isUrgent) return 'rgba(248,250,252,0.84)'
+  if (d?.data?.current_priority === 'high') return 'rgba(248,250,252,0.52)'
+  return '#1f2937'
+}
+
+function nodeStrokeWidth(d) {
+  if (d?.__isUrgent) return 2.4
+  if (d?.data?.current_priority === 'high') return 1.9
+  return 1.5
+}
+
+function nodeFilter(d) {
+  if (d?.__isUrgent) return 'drop-shadow(0 0 7px rgba(248,250,252,0.45))'
+  return null
+}
+
+function dueMarkerLabel(dueState) {
+  if (!dueState) return ''
+  if (dueState.state === 'overdue') return '逾'
+  if (dueState.state === 'today') return '今'
+  if (dueState.days > 0) return `${dueState.days}天`
+  return ''
+}
+
+function dueMarkerColors(dueState) {
+  if (dueState?.state === 'overdue') {
+    return { stroke: '#f87171', fill: 'rgba(127,29,29,0.28)', text: '#fecaca' }
+  }
+  if (dueState?.state === 'today' || dueState?.state === 'three_days') {
+    return { stroke: '#fbbf24', fill: 'rgba(120,53,15,0.28)', text: '#fde68a' }
+  }
+  return { stroke: '#f59e0b', fill: 'rgba(120,53,15,0.16)', text: '#fcd34d' }
 }
 
 function withDerivedWeightMeta(hNode) {
@@ -254,6 +376,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     const root = d3.hierarchy(treeData, d => d.expanded === false ? null : d.children)
     assignCumulativeFlow(root, userGoal)
+    assignBranchVisuals(root)
     const treeLayout = d3.tree()
       .nodeSize([NODE_V_GAP, NODE_H_GAP])
       .separation((a, b) => {
@@ -286,11 +409,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('data-completeness', d => Number.isFinite(d.target.__completeness) ? d.target.__completeness.toFixed(2) : '')
       .attr('data-goal-fit', d => Number.isFinite(d.target.__goalFit) ? d.target.__goalFit.toFixed(2) : '')
       .attr('data-recommendation-rank', d => Number.isFinite(d.target.__recommendationRank) ? d.target.__recommendationRank.toFixed(2) : '')
-      .attr('stroke', d =>
-        d.source.depth === 0 ? '#374151' : getNodeColor(d.source.data)
-      )
+      .attr('stroke', d => d.target.__displayColor || '#64748b')
       .call(selection => applyLinkStrokeWidth(selection))
-      .attr('opacity', 0.45)
+      .attr('opacity', d => linkOpacity(d))
       .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
 
     // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
@@ -377,14 +498,27 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('fill', 'transparent')
       .style('cursor', 'grab')
 
+    // 紧急优先级 halo：不改变主色，只加一个轻微的视觉层。
+    node.filter(d => d.__isUrgent)
+      .append('circle')
+      .attr('class', 'node-priority-halo')
+      .attr('r', d => getNodeRadius(d.data.type) + 4)
+      .attr('fill', 'none')
+      .attr('stroke', 'rgba(248,250,252,0.62)')
+      .attr('stroke-width', 1.4)
+      .attr('stroke-dasharray', '3,3')
+      .attr('pointer-events', 'none')
+
     // 圆圈
     node.filter(d => d.data.type !== 'root')
       .append('circle')
       .attr('class', 'node-main-circle')
       .attr('r', d => getNodeRadius(d.data.type))
-      .attr('fill', d => getNodeColor(d.data))
-      .attr('stroke', '#1f2937')
-      .attr('stroke-width', 1.5)
+      .attr('fill', d => d.__displayColor || '#64748b')
+      .attr('stroke', d => nodeStrokeColor(d))
+      .attr('stroke-width', d => nodeStrokeWidth(d))
+      .attr('opacity', d => d.__visualOpacity ?? 1)
+      .attr('filter', d => nodeFilter(d))
       .style('cursor', 'grab')
       .on('mouseenter', function (event, d) {
         d3.select(this).attr('r', getNodeRadius(d.data.type) * 1.14)
@@ -407,6 +541,48 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('font-size', d => getNodeRadius(d.data.type) * 0.9)
       .attr('pointer-events', 'none')
       .text('✓')
+
+    node.filter(d => d.data.status === 'dormant')
+      .append('text')
+      .attr('class', 'node-status-mark')
+      .attr('dy', '0.35em')
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#0f1117')
+      .attr('font-size', d => getNodeRadius(d.data.type) * 0.7)
+      .attr('font-weight', 700)
+      .attr('pointer-events', 'none')
+      .text('||')
+
+    const dueMarker = node.filter(d => d.__dueVisible)
+      .append('g')
+      .attr('class', 'node-due-marker')
+      .attr('transform', d => {
+        const r = getNodeRadius(d.data.type)
+        return `translate(${r + 12},${-r - 11})`
+      })
+      .attr('pointer-events', 'none')
+
+    dueMarker.append('rect')
+      .attr('x', d => {
+        const label = dueMarkerLabel(d.__dueState)
+        return -(label.length > 1 ? 13 : 9)
+      })
+      .attr('y', -7)
+      .attr('width', d => dueMarkerLabel(d.__dueState).length > 1 ? 26 : 18)
+      .attr('height', 14)
+      .attr('rx', 5)
+      .attr('ry', 5)
+      .attr('fill', d => dueMarkerColors(d.__dueState).fill)
+      .attr('stroke', d => dueMarkerColors(d.__dueState).stroke)
+      .attr('stroke-width', 1)
+
+    dueMarker.append('text')
+      .attr('text-anchor', 'middle')
+      .attr('dy', '0.34em')
+      .attr('fill', d => dueMarkerColors(d.__dueState).text)
+      .attr('font-size', 9)
+      .attr('font-weight', 700)
+      .text(d => dueMarkerLabel(d.__dueState))
 
     // 标签
     node.filter(d => shouldShowLabel(d, density))
@@ -459,11 +635,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     // 全部复位
     g.selectAll('.node-main-circle')
-      .attr('stroke', '#1f2937')
-      .attr('stroke-width', 1.5)
-      .attr('filter', null)
+      .attr('stroke', d => nodeStrokeColor(d))
+      .attr('stroke-width', d => nodeStrokeWidth(d))
+      .attr('filter', d => nodeFilter(d))
     g.selectAll('.link')
-      .attr('opacity', 0.45)
+      .attr('opacity', d => linkOpacity(d))
       .each(function () {
         applyLinkStrokeWidth(d3.select(this))
       })
@@ -627,7 +803,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       dragRef.current.previewLine?.remove()
       dragRef.current.previewBadge?.remove()
       dragRef.current.hoverEl && d3.select(dragRef.current.hoverEl).select('.node-main-circle')
-        .attr('stroke', '#1f2937').attr('stroke-width', 1.5)
+        .attr('stroke', d => nodeStrokeColor(d))
+        .attr('stroke-width', d => nodeStrokeWidth(d))
+        .attr('filter', d => nodeFilter(d))
     }
 
     const disableAddDuringDrag = () => {
@@ -940,7 +1118,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         if (drop?.el !== dragRef.current.hoverEl || drop?.mode !== dragRef.current.hoverMode || drop?.placement !== dragRef.current.hoverPlacement) {
           if (dragRef.current.hoverEl) {
             d3.select(dragRef.current.hoverEl).select('.node-main-circle')
-              .attr('stroke', '#1f2937').attr('stroke-width', 1.5)
+              .attr('stroke', d => nodeStrokeColor(d))
+              .attr('stroke-width', d => nodeStrokeWidth(d))
+              .attr('filter', d => nodeFilter(d))
           }
           if (drop?.el) {
             d3.select(drop.el).select('.node-main-circle')

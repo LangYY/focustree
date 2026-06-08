@@ -90,7 +90,7 @@ export default function App() {
     density, setDensity,
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, clearAll, annotateNode, updateNodeDetails, updateWeight, moveNode, reorderNode,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, annotateNode, updateNodeDetails, updateNodePlanning, updateWeight, moveNode, reorderNode,
     history, future, canUndo, canRedo, lastAction, nextAction, undo, redo,
   } = useTree(user)
 
@@ -220,7 +220,13 @@ export default function App() {
       if (!confirmRiskyDelete(node, treeData, goal)) return
       await guardedDeleteNode(node.id)
     }
-  }, [updateStatus, guardedDeleteNode, updateWeight, treeData, goal, createDefaultNode])
+    if (action === 'delete-only') {
+      await deleteNodeOnly(node.id)
+      const nextSelection = node.parent_id || null
+      setSelectedNodeId(nextSelection)
+      setHighlightedNodeId(nextSelection)
+    }
+  }, [updateStatus, guardedDeleteNode, deleteNodeOnly, updateWeight, treeData, goal, createDefaultNode])
 
   const deleteSelectedNode = useCallback(async () => {
     if (!selectedNode || selectedNode.type === 'root') return
@@ -380,6 +386,7 @@ export default function App() {
           onClose={() => setSelectedNodeId(null)}
           onRenameNode={renameNode}
           onUpdateDetails={updateNodeDetails}
+          onUpdatePlanning={updateNodePlanning}
           onStatusChange={updateStatus}
         />
 

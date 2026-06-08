@@ -17,6 +17,8 @@ create table if not exists public.nodes (
 
   color text,
   weight real not null default 1.0 check (weight >= 0 and weight <= 2),
+  current_priority text check (current_priority is null or current_priority in ('low', 'normal', 'high', 'urgent')),
+  target_completion_date date,
   position bigint not null default ((extract(epoch from now()) * 1000)::bigint),
   expanded boolean not null default true,
 
@@ -33,6 +35,14 @@ create index if not exists idx_nodes_user_parent_position
 
 create index if not exists idx_nodes_user_status
   on public.nodes(user_id, status);
+
+create index if not exists idx_nodes_user_priority
+  on public.nodes(user_id, current_priority)
+  where current_priority is not null;
+
+create index if not exists idx_nodes_user_target_completion
+  on public.nodes(user_id, target_completion_date)
+  where target_completion_date is not null;
 
 create index if not exists idx_nodes_user_completed
   on public.nodes(user_id, completed_at desc)

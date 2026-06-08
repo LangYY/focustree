@@ -23,8 +23,8 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
   // 保证不超出屏幕右/下边界
   const style = {
     position: 'fixed',
-    left: Math.min(x, window.innerWidth - 180),
-    top:  Math.min(y, window.innerHeight - 240),
+    left: Math.min(x, window.innerWidth - 208),
+    top:  Math.min(y, window.innerHeight - 280),
     zIndex: 1000,
   }
 
@@ -38,12 +38,13 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
   const localShare = safeRatio(node.__localShare ?? node.weight ?? 1)
   const effectiveShare = safeRatio(node.__flow ?? localShare, localShare)
   const effectivePct = Math.round(effectiveShare * 100)
+  const hasChildren = (node.children?.length || 0) > 0
 
   return (
     <div
       ref={ref}
       style={style}
-      className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 w-44 text-sm"
+      className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 w-52 text-sm"
     >
       {/* 节点信息头 */}
       <div className="px-3 py-2 border-b border-gray-800">
@@ -99,9 +100,16 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
         <div className="border-t border-gray-800 my-1" />
 
         {/* 删除 */}
+        {hasChildren && node.parent_id && (
+          <MenuItem
+            icon="CUT"
+            label="只删除此节点"
+            onClick={() => { onAction('delete-only', { node }); onClose() }}
+          />
+        )}
         <MenuItem
           icon="DEL"
-          label="删除"
+          label={hasChildren ? '删除整支' : '删除'}
           danger
           onClick={() => { onAction('delete', { node }); onClose() }}
         />

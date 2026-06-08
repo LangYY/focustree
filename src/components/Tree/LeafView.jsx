@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
-import { getDerivedWeightMeta, getDerivedWeightMetaMap } from '../../lib/treeUtils'
+import { getDerivedWeightMeta, getDerivedWeightMetaMap, getNodeDueState, PRIORITY_LABELS } from '../../lib/treeUtils'
 
 const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
-const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停' }
 
 function safePercent(value) {
   const numeric = Number(value)
@@ -71,6 +70,8 @@ function Section({ title, tasks, onStatusChange, dimmed }) {
 }
 
 function TaskRow({ task, onStatusChange, dimmed }) {
+  const priorityLabel = PRIORITY_LABELS[task.current_priority] || ''
+  const dueState = getNodeDueState(task)
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
@@ -103,6 +104,18 @@ function TaskRow({ task, onStatusChange, dimmed }) {
               className="inline-block w-2 h-2 rounded-full flex-shrink-0"
             />
             <span className="text-xs text-gray-500">{task.projectName}</span>
+            {priorityLabel && (
+              <span className={`text-xs ${task.current_priority === 'urgent' ? 'text-white' : 'text-gray-500'}`}>
+                · {priorityLabel}
+              </span>
+            )}
+            {task.target_completion_date && (
+              <span className={`text-xs ${
+                dueState?.state && dueState.state !== 'later' ? 'text-amber-300' : 'text-gray-500'
+              }`}>
+                · {dueState?.label || task.target_completion_date}
+              </span>
+            )}
           </div>
         )}
       </div>
