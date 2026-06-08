@@ -21,6 +21,7 @@ const DROP_HIT_PADDING = 14
 const NODE_HIT_PADDING = 6
 const TERMINAL_BRANCH_HIT_WIDTH = 18
 const ADD_CHILD_DRAG_MIN_X = 28
+const DROP_MOVE_BAND_MIN = 10
 const MIDDLE_MOUSE_BUTTON = 1
 const ZOOM_MIN = 0.15
 const ZOOM_MAX = 3
@@ -724,7 +725,20 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       const sourceParentId = sourceNode?.data?.parent_id || null
       const targetParentId = targetNode?.data?.parent_id || null
       if (sourceParentId === targetParentId) {
-        const [, pointerY] = d3.pointer({ clientX, clientY }, gRef.current)
+        const [pointerX, pointerY] = d3.pointer({ clientX, clientY }, gRef.current)
+        const radius = getNodeRadius(targetNode.data.type)
+        const dx = pointerX - targetNode.y
+        const dy = pointerY - targetNode.x
+        const moveBand = Math.max(DROP_MOVE_BAND_MIN, radius * 0.65)
+        const overMoveBand =
+          Math.abs(dy) <= moveBand &&
+          dx >= -radius - DROP_HIT_PADDING &&
+          dx <= radius + DROP_LABEL_WIDTH
+
+        if (overMoveBand) {
+          return { mode: 'move', placement: null }
+        }
+
         return {
           mode: 'reorder',
           placement: pointerY <= targetNode.x ? 'before' : 'after',
