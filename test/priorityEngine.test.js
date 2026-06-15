@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { computePriorityMetaMap, getPriorityMeta, nodePriorityFingerprint } from '../src/lib/priorityEngine.js'
+import { getPriorityLinkStrokeWidth } from '../src/lib/treeUtils.js'
 
 const NOW = new Date('2026-06-15T12:00:00+08:00')
 
@@ -127,4 +128,14 @@ test('clearing or replacing a goal invalidates confirmed goal semantics', () => 
   assert.equal(getPriorityMeta(current, 'task').staleReasons.length, 0)
   assert.ok(getPriorityMeta(cleared, 'task').staleReasons.includes('goal_changed'))
   assert.equal(getPriorityMeta(cleared, 'task').relationType, 'normal')
+})
+
+test('priority stroke mapping makes meaningful score differences visible', () => {
+  const low = getPriorityLinkStrokeWidth(20)
+  const high = getPriorityLinkStrokeWidth(80)
+
+  assert.equal(getPriorityLinkStrokeWidth(-10), 2)
+  assert.equal(getPriorityLinkStrokeWidth(100), 14)
+  assert.equal(getPriorityLinkStrokeWidth(120), 14)
+  assert.ok(high - low >= 7)
 })

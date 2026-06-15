@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
 import {
   getNodeRadius,
-  getLinkStrokeWidth,
+  getPriorityLinkStrokeWidth,
   findNodeById,
   getDerivedWeightMetaMap,
   getDerivedWeightMeta,
@@ -155,8 +155,6 @@ function assignCumulativeFlow(root, userGoal) {
     node.__priorityAnalysisConfidence = meta?.analysisConfidence ?? null
     node.__priorityStaleReasons = meta?.staleReasons ?? []
     node.__prioritySignals = meta?.signalBreakdown ?? []
-    // Existing SVG width mapping remains in place until the separate UI phase.
-    node.__flow = (meta?.branchPriority ?? 0) / 100
   })
 }
 
@@ -167,7 +165,7 @@ function linkStrokeWidth(d) {
   else if (target?.data?.current_priority === 'high') extra += 0.7
   if (target?.__dueState?.state === 'overdue' || target?.__dueState?.state === 'today') extra += 0.8
   else if (target?.__dueState?.state === 'three_days') extra += 0.45
-  return getLinkStrokeWidth(target?.__flow) + extra
+  return getPriorityLinkStrokeWidth(target?.__branchPriority) + extra
 }
 
 function applyLinkStrokeWidth(selection, extra = 0) {
@@ -404,7 +402,6 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .join('path')
       .attr('class', 'link')
       .attr('data-target-id', d => d.target.data.id || '')
-      .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
       .attr('data-direct-priority', d => Number.isFinite(d.target.__directPriority) ? d.target.__directPriority.toFixed(1) : '')
       .attr('data-branch-priority', d => Number.isFinite(d.target.__branchPriority) ? d.target.__branchPriority.toFixed(1) : '')
       .attr('data-cultivation', d => Number.isFinite(d.target.__cultivationScore) ? d.target.__cultivationScore.toFixed(1) : '')

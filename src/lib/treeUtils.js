@@ -190,6 +190,12 @@ export function getLinkStrokeWidth(flow = 1) {
   return 2 + Math.sqrt(clampedFlow) * 9
 }
 
+export function getPriorityLinkStrokeWidth(priority = 0) {
+  const numeric = Number.isFinite(Number(priority)) ? Number(priority) : 0
+  const normalized = Math.max(0, Math.min(100, numeric)) / 100
+  return 2 + Math.pow(normalized, 1.35) * 12
+}
+
 function normalizedWeight(value) {
   if (value === null || value === undefined || value === '') return 1
   const numeric = Number(value)
