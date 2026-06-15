@@ -28,12 +28,12 @@ export function collectPriorityAnalysisNodes(treeData, nodeIds = null) {
 export function estimatePriorityAnalysisTokens(nodes, goal) {
   const inputChars = JSON.stringify({ goal, nodes }).length + 1200
   const inputTokens = Math.ceil(inputChars / 1.8)
-  const outputTokens = (nodes?.length || 0) * 105
+  const outputTokens = (nodes?.length || 0) * 150
   return Math.max(900, inputTokens + outputTokens)
 }
 
 export function formatTokenEstimate(tokens) {
   const numeric = Number(tokens) || 0
   if (numeric < 1000) return `约 ${Math.round(numeric)} tokens`
-  return `约 ${(numeric / 1000).toFixed(numeric >= 10000 ? 0 : 1)}k tokens`
+  return `约 ${(numeric / 1000).toFixed(1)}k tokens`
 }

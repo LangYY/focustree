@@ -7,7 +7,7 @@ const ENV = globalThis.process?.env || {}
 export function estimatePriorityAnalysisTokens(nodes, goal) {
   const inputChars = JSON.stringify({ goal, nodes }).length + 1200
   const inputTokens = Math.ceil(inputChars / 1.8)
-  const outputTokens = (nodes?.length || 0) * 105
+  const outputTokens = (nodes?.length || 0) * 150
   return Math.max(900, inputTokens + outputTokens)
 }
 
