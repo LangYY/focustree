@@ -4,6 +4,7 @@ import { treeToPromptText, flattenTree, findNodeById } from '../lib/treeUtils'
 import { getClientTime } from '../lib/clientTime'
 import { classifyIntent } from '../lib/intentClassifier'
 import { routeLocalQuery } from '../lib/agentRouter'
+import { collectPriorityAnalysisNodes } from '../lib/priorityAnalysis'
 
 const WELCOME = {
   id: 'welcome',
@@ -823,6 +824,101 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
   }, [messages, treeActions, user, sessionId, userGoal])
 
+  /** Request semantic signals only; final scores remain local and require confirmation. */
+  const requestPriorityAnalysis = useCallback(async (treeData, options = {}) => {
+    if (isLoading) return { status: 'busy' }
+    if (!userGoal?.text) {
+      const content = '请先设置一个当前目标。AI 需要目标才能判断契合度、必要性和延误损失。'
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
+      return { status: 'missing_goal' }
+    }
+
+    const mode = options.mode === 'all' ? 'all' : 'missing'
+    const nodes = collectPriorityAnalysisNodes(treeData, options.nodeIds || null)
+    if (!nodes.length) {
+      const content = '当前没有需要补充 AI 语义分析的未完成节点。本地分数已经是最新状态。'
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
+      return { status: 'empty' }
+    }
+
+    const activeSession = sessionId || uuid()
+    if (!sessionId) setSessionId(activeSession)
+    const requestText = mode === 'all'
+      ? `重新分析整棵树中的 ${nodes.length} 个未完成节点`
+      : `补充 ${nodes.length} 个缺失或过期节点的优先级分析`
+    const userMsg = { id: uuid(), role: 'user', content: requestText, kind: 'local' }
+    setMessages(prev => [...prev, userMsg])
+    setIsLoading(true)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    const startedAt = performance.now()
+
+    try {
+      if (user) {
+        await supabase.from('conversations').insert({
+          user_id: user.id,
+          role: 'user',
+          content: requestText,
+          session_id: activeSession,
+        })
+      }
+
+      const response = await fetch('/api/priority-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, goal: userGoal, mode }),
+        signal: controller.signal,
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || `分析请求失败（${response.status}）`)
+
+      const proposals = Array.isArray(result.proposals) ? result.proposals : []
+      const content = `AI 已完成 ${proposals.length} 个节点的语义分析。请在下方检查和修正；确认后，本地算法才会重新计算枝干粗细。`
+      const assistantMsg = {
+        id: uuid(),
+        role: 'assistant',
+        content,
+        intent: 'query',
+        thinking: { node_priority_proposals: proposals },
+        model_used: result.model_used || null,
+        response_ms: Math.round(performance.now() - startedAt),
+        usage: result.usage || null,
+        usage_cost: result.usage_cost || null,
+        priority_analysis_mode: mode,
+      }
+      setMessages(prev => [...prev, assistantMsg])
+
+      if (user) {
+        await supabase.from('conversations').insert({
+          user_id: user.id,
+          role: 'assistant',
+          content,
+          session_id: activeSession,
+        })
+        const { error } = await supabase.from('priority_analysis_runs').insert({
+          user_id: user.id,
+          goal_version: userGoal.version || null,
+          goal_snapshot: userGoal,
+          proposals,
+          confirmed_payload: null,
+          status: 'proposed',
+          model_used: result.model_used || null,
+        })
+        if (error) console.warn('[priority analysis proposal audit]', error.message)
+      }
+      return { status: 'proposed', count: proposals.length, usage: result.usage }
+    } catch (error) {
+      if (controller.signal.aborted) return { status: 'aborted' }
+      const content = `AI 优先级分析没有完成：${error.message}`
+      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local', isError: true }])
+      return { status: 'error', error }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null
+      setIsLoading(false)
+    }
+  }, [isLoading, sessionId, user, userGoal])
+
   /**
    * 用户主动新开对话。
    * DB 中保留旧 session 历史，可在历史面板查阅；旧 session 会异步摘要。
@@ -931,6 +1027,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     // 周末回顾
     injectReviewMessage,
     applyPriorityAnalysis,
+    requestPriorityAnalysis,
     applyDraftPlan,
   }
 }

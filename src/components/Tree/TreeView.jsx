@@ -236,7 +236,7 @@ function isTypingTarget(element) {
   return tag === 'input' || tag === 'textarea' || tag === 'select' || element?.isContentEditable
 }
 
-export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode }) {
+export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode, priorityCalculationVersion }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
   const zoomRef = useRef(null)
@@ -628,7 +628,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       autoCenteredRef.current = true
     }
 
-  }, [treeData, userGoal, density, startInlineRename])
+  }, [treeData, userGoal, density, startInlineRename, priorityCalculationVersion])
 
   // ── 高亮：监听 highlightedNodeId 变化，更新节点圆圈 + 祖先路径 ──
   useEffect(() => {

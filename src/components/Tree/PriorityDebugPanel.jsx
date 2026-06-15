@@ -1,5 +1,10 @@
 import { useMemo, useState } from 'react'
 import { computePriorityMetaMap, getPriorityMeta } from '../../lib/priorityEngine'
+import {
+  collectPriorityAnalysisNodes,
+  estimatePriorityAnalysisTokens,
+  formatTokenEstimate,
+} from '../../lib/priorityAnalysis'
 
 const SIGNAL_LABELS = {
   baseline: '基础值',
@@ -18,15 +23,24 @@ const STALE_LABELS = {
   missing_analysis: '尚无 AI 分析',
 }
 
-export default function PriorityDebugPanel({ treeData, goal, onClose }) {
+export default function PriorityDebugPanel({
+  treeData,
+  goal,
+  calculationVersion,
+  analysisLoading,
+  onRecalculate,
+  onRequestAnalysis,
+  onClose,
+}) {
   const [comparisonDraft, setComparisonDraft] = useState('')
   const [comparisonGoal, setComparisonGoal] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
+  const [confirmFullAnalysis, setConfirmFullAnalysis] = useState(false)
 
   const nodes = useMemo(() => flattenTree(treeData).filter(node => node.type !== 'root'), [treeData])
   const currentMeta = useMemo(
-    () => computePriorityMetaMap(treeData, { goal }),
-    [goal, treeData]
+    () => computePriorityMetaMap(treeData, { goal, now: new Date(Number(calculationVersion) || 0) }),
+    [calculationVersion, goal, treeData]
   )
   const comparisonMeta = useMemo(
     () => comparisonGoal
@@ -46,7 +60,16 @@ export default function PriorityDebugPanel({ treeData, goal, onClose }) {
   }).sort((a, b) => (b.meta?.branchPriority || 0) - (a.meta?.branchPriority || 0)), [comparisonMeta, currentMeta, nodes])
 
   const selected = rows.find(row => String(row.node.id) === String(selectedId)) || rows[0] || null
-  const staleCount = rows.filter(row => row.meta?.staleReasons?.length).length
+  const analyzableRows = rows.filter(row => row.node.status !== 'done')
+  const staleRows = analyzableRows.filter(row => row.meta?.staleReasons?.length)
+  const staleIds = staleRows.map(row => row.node.id)
+  const staleNodes = collectPriorityAnalysisNodes(treeData, staleIds)
+  const allAnalysisNodes = useMemo(
+    () => collectPriorityAnalysisNodes(treeData),
+    [treeData]
+  )
+  const staleEstimate = estimatePriorityAnalysisTokens(staleNodes, goal)
+  const allEstimate = estimatePriorityAnalysisTokens(allAnalysisNodes, goal)
 
   const runComparison = () => {
     const text = comparisonDraft.trim()
@@ -89,9 +112,50 @@ export default function PriorityDebugPanel({ treeData, goal, onClose }) {
             <button onClick={() => { setComparisonGoal(null); setComparisonDraft('') }} className="ml-2 text-gray-600 hover:text-gray-300">清除</button>
           </div>
         )}
-        {staleCount > 0 && (
-          <div className="text-[10px] text-amber-400/90">{staleCount} 个节点的 AI 判断已过期或尚未确认，当前使用本地信号回退。</div>
+        {staleRows.length > 0 && (
+          <div className="text-[10px] text-amber-400/90">{staleRows.length} 个未完成节点的 AI 判断已过期或尚未确认，当前使用本地信号回退。</div>
         )}
+        <div className="rounded border border-gray-800 bg-gray-900/50 p-2 space-y-1.5">
+          <div className="text-[10px] text-gray-500">状态、日期、人工优先级与路径传播始终在本地计算，不消耗 token。</div>
+          <div className="text-[9px] text-gray-700">本地计算时间：{formatCalculationTime(calculationVersion)}</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={onRecalculate}
+              className="rounded border border-gray-700 px-2 py-1.5 text-[11px] text-gray-300 hover:border-gray-500 hover:bg-gray-800"
+            >
+              本地重算 · 0 token
+            </button>
+            <button
+              onClick={() => onRequestAnalysis?.({ mode: 'missing', nodeIds: staleIds })}
+              disabled={analysisLoading || !goal?.text || staleRows.length === 0}
+              className="rounded border border-violet-800 px-2 py-1.5 text-[11px] text-violet-300 hover:bg-violet-950/50 disabled:border-gray-800 disabled:text-gray-600"
+            >
+              {analysisLoading ? '分析中…' : `补充 ${staleRows.length} 项`}
+              <span className="block text-[9px] opacity-70">{staleRows.length ? formatTokenEstimate(staleEstimate) : '无需补充'}</span>
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              if (!confirmFullAnalysis) {
+                setConfirmFullAnalysis(true)
+                return
+              }
+              setConfirmFullAnalysis(false)
+              onRequestAnalysis?.({ mode: 'all' })
+            }}
+            disabled={analysisLoading || !goal?.text || allAnalysisNodes.length === 0}
+            className={`w-full rounded border px-2 py-1.5 text-[11px] disabled:border-gray-800 disabled:text-gray-600 ${
+              confirmFullAnalysis
+                ? 'border-amber-700 bg-amber-950/40 text-amber-300'
+                : 'border-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300'
+            }`}
+          >
+            {confirmFullAnalysis
+              ? `确认重析 ${allAnalysisNodes.length} 个节点 · ${formatTokenEstimate(allEstimate)}`
+              : `全树重新分析 · ${formatTokenEstimate(allEstimate)}`}
+          </button>
+          {!goal?.text && <div className="text-[10px] text-amber-500">设置当前目标后才能进行 AI 语义分析。</div>}
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 grid grid-rows-[minmax(150px,42%)_1fr]">
@@ -211,4 +275,10 @@ function flattenTree(tree) {
   }
   walk(tree)
   return output
+}
+
+function formatCalculationTime(value) {
+  const date = new Date(Number(value) || 0)
+  if (Number.isNaN(date.getTime())) return '尚未计算'
+  return date.toLocaleTimeString('zh-CN', { hour12: false })
 }

@@ -43,6 +43,7 @@ export default function App() {
   const [recsOpen,    setRecsOpen]    = useState(false)
   const [backupOpen,  setBackupOpen]  = useState(false)
   const [priorityDebugOpen, setPriorityDebugOpen] = useState(false)
+  const [priorityCalculationVersion, setPriorityCalculationVersion] = useState(() => Date.now())
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
   const [selectedNodeId, setSelectedNodeId] = useState(null)
   const resetZoomRef              = useRef(null)
@@ -138,6 +139,7 @@ export default function App() {
     recentSummaries,
     injectReviewMessage,
     applyPriorityAnalysis,
+    requestPriorityAnalysis,
     applyDraftPlan,
   } = useChat(user, treeActions, goal, model)
 
@@ -361,6 +363,7 @@ export default function App() {
                 onLeafAdd={createDefaultNode}
                 onDropBranch={handleDropBranch}
                 onRenameNode={renameNode}
+                priorityCalculationVersion={priorityCalculationVersion}
               />
             </>
           )}
@@ -381,6 +384,13 @@ export default function App() {
           <PriorityDebugPanel
             treeData={treeData}
             goal={goal}
+            calculationVersion={priorityCalculationVersion}
+            analysisLoading={chatLoading}
+            onRecalculate={() => setPriorityCalculationVersion(Date.now())}
+            onRequestAnalysis={async options => {
+              setChatOpen(true)
+              return requestPriorityAnalysis(treeData, options)
+            }}
             onClose={() => setPriorityDebugOpen(false)}
           />
         )}

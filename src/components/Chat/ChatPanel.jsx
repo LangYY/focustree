@@ -351,7 +351,7 @@ function PriorityAnalysisCard({ thinking, applied, onApply }) {
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
         {proposals.map((proposal, index) => (
           <div key={`${proposal.node_id}-${index}`} className="border-l border-violet-800/60 pl-2">
             <div className="mb-1 flex items-baseline justify-between gap-2">

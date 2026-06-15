@@ -8,6 +8,7 @@ import { summarizeSession } from './summarizer.js'
 import { generateDailyFocus } from './dailyFocus.js'
 import { generateWeeklyReview } from './weeklyReview.js'
 import { postChatCompletion } from './llmClient.js'
+import { analyzePriorityNodes, estimatePriorityAnalysisTokens } from './priorityAnalysis.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.resolve(__dirname, '../dist')
@@ -95,6 +96,46 @@ app.get('/runtime-config.js', (req, res) => {
       supabaseUrl: PUBLIC_SUPA_URL,
       supabaseAnonKey: PUBLIC_SUPA_KEY,
     })};`)
+})
+
+// ── /api/priority-analysis ────────────────────────────
+
+app.post('/api/priority-analysis', async (req, res) => {
+  const { nodes, goal, mode = 'missing' } = req.body || {}
+  if (!API_KEY) return res.status(500).json({ error: 'API key not configured' })
+  if (!goal?.text) return res.status(400).json({ error: '请先设置当前目标。' })
+  if (!Array.isArray(nodes) || nodes.length === 0) return res.status(400).json({ error: '没有需要分析的节点。' })
+
+  const controller = new AbortController()
+  const abort = () => {
+    if (!res.writableEnded) controller.abort()
+  }
+  req.on('aborted', abort)
+  res.on('close', abort)
+
+  try {
+    console.log(`[/api/priority-analysis] mode=${mode}, nodes=${nodes.length}, estimate=${estimatePriorityAnalysisTokens(nodes, goal)}`)
+    const result = await analyzePriorityNodes({
+      nodes,
+      goal,
+      provider: LLM_PROVIDER,
+      apiKey: API_KEY,
+      signal: controller.signal,
+    })
+    if (!controller.signal.aborted) {
+      res.json({
+        proposals: result.proposals,
+        usage: result.usage,
+        usage_cost: result.usageCost,
+        model_used: result.modelUsed,
+        batches: result.batches,
+        estimated_tokens: result.estimatedTokens,
+      })
+    }
+  } catch (error) {
+    console.error('[/api/priority-analysis]', error.message)
+    if (!controller.signal.aborted) res.status(500).json({ error: error.message || '优先级分析失败。' })
+  }
 })
 
 // ── /api/agent ────────────────────────────────────────
