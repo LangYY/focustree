@@ -269,64 +269,134 @@ function DraftPlanCard({ thinking, applied, onApply }) {
   )
 }
 
-function WeightPlanCard({ thinking, applied, onApply }) {
-  const proposals = Array.isArray(thinking?.branch_weight_proposals)
-    ? thinking.branch_weight_proposals.map(normalizeWeightProposal).filter(p => p.share != null)
+function PriorityAnalysisCard({ thinking, applied, onApply }) {
+  const sourceGoal = thinking?.goal_analysis || null
+  const sourceProposals = Array.isArray(thinking?.node_priority_proposals)
+    ? thinking.node_priority_proposals
     : []
-  if (!proposals.length) return null
+  const [goal, setGoal] = useState(() => sourceGoal ? { ...sourceGoal } : null)
+  const [proposals, setProposals] = useState(() => sourceProposals.map(normalizePriorityProposal))
+  if (!goal && !proposals.length) return null
 
-  const total = proposals.reduce((sum, p) => sum + p.share, 0)
-  const totalPct = Math.round(total * 100)
-  const needsNormalization = total > 0 && Math.abs(total - 1) > 0.01
-  const conflicts = Array.isArray(thinking?.conflicts) ? thinking.conflicts.filter(Boolean) : []
-  const blocked = conflicts.length > 0 || thinking?.weight_strategy?.requires_clarification
-  const strategy = thinking?.weight_strategy || {}
-  const scopeLabel = strategy.scope === 'nested' ? '子分支精力配比' : '顶层精力配比'
+  const updateProposal = (index, key, value) => {
+    setProposals(current => current.map((proposal, itemIndex) => (
+      itemIndex === index ? { ...proposal, [key]: value } : proposal
+    )))
+  }
 
   return (
     <div className="mt-2 border-t border-gray-700/70 pt-2 text-[11px] leading-relaxed">
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <div>
-          <span className="text-violet-300 font-medium">权重方案</span>
-          <span className="text-gray-500 ml-1">
-            {scopeLabel}：{totalPct}%
-          </span>
-        </div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-violet-300 font-medium">目标与优先级分析</span>
         <button
-          onClick={onApply}
-          disabled={applied || blocked || !onApply}
+          onClick={() => onApply?.({ goal_analysis: goal, node_priority_proposals: proposals })}
+          disabled={applied || !onApply}
           className="text-[11px] px-2 py-1 rounded-md bg-violet-700/80 hover:bg-violet-600 text-white disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
         >
-          {applied ? '已应用' : blocked ? '需确认' : '应用权重方案'}
+          {applied ? '已确认' : '确认并应用'}
         </button>
       </div>
 
-      {needsNormalization && (
-        <div className="mb-1.5 text-amber-300">
-          这是相对权重，应用时会归一化为 100%。
+      {goal && (
+        <div className="mb-2 space-y-1.5 border-l border-emerald-800/60 pl-2">
+          <div className="text-emerald-300">目标拆解</div>
+          <input
+            value={goal.outcome || goal.text || ''}
+            onChange={event => setGoal(current => ({ ...current, outcome: event.target.value, text: event.target.value }))}
+            disabled={applied}
+            className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 text-gray-200 outline-none focus:border-emerald-600"
+          />
+          <div className="grid grid-cols-2 gap-1.5">
+            <select
+              value={goal.kind || 'long_term'}
+              onChange={event => setGoal(current => ({ ...current, kind: event.target.value }))}
+              disabled={applied}
+              className="rounded border border-gray-700 bg-gray-950 px-1.5 py-1 text-gray-300"
+            >
+              <option value="long_term">长期目标</option>
+              <option value="stage">阶段目标</option>
+            </select>
+            <input
+              type="date"
+              value={goal.deadline || ''}
+              onChange={event => setGoal(current => ({
+                ...current,
+                deadline: event.target.value || null,
+                kind: event.target.value ? 'stage' : current.kind,
+              }))}
+              disabled={applied}
+              className="rounded border border-gray-700 bg-gray-950 px-1.5 py-1 text-gray-300"
+            />
+          </div>
+          <input
+            value={Array.isArray(goal.constraints) ? goal.constraints.join('；') : ''}
+            onChange={event => setGoal(current => ({
+              ...current,
+              constraints: event.target.value.split(/[；;]/).map(item => item.trim()).filter(Boolean),
+            }))}
+            disabled={applied}
+            placeholder="约束条件（用分号分隔）"
+            className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 text-gray-300 outline-none focus:border-emerald-600"
+          />
+          <input
+            value={Array.isArray(goal.exclude) ? goal.exclude.join('；') : ''}
+            onChange={event => setGoal(current => ({
+              ...current,
+              exclude: event.target.value.split(/[；;]/).map(item => item.trim()).filter(Boolean),
+            }))}
+            disabled={applied}
+            placeholder="暂时排除（用分号分隔）"
+            className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 text-gray-300 outline-none focus:border-emerald-600"
+          />
         </div>
       )}
-      {strategy.conflict_note && (
-        <div className="mb-1.5 text-amber-300">{strategy.conflict_note}</div>
-      )}
-      {conflicts.length > 0 && (
-        <ul className="mb-1.5 space-y-0.5">
-          {conflicts.map((item, index) => (
-            <li key={index} className="text-amber-300">· {item}</li>
-          ))}
-        </ul>
-      )}
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {proposals.map((proposal, index) => (
-          <div key={`${proposal.name}-${index}`} className="pl-2 border-l border-violet-800/60">
-            <div className="flex items-baseline justify-between gap-2">
+          <div key={`${proposal.node_id}-${index}`} className="border-l border-violet-800/60 pl-2">
+            <div className="mb-1 flex items-baseline justify-between gap-2">
               <span className="text-gray-200">{proposal.name}</span>
-              <span className="text-violet-300 font-medium">{Math.round(proposal.share * 100)}%</span>
+              <span className="text-gray-600">置信 {Math.round(proposal.confidence * 100)}%</span>
             </div>
-            {typeof proposal.confidence === 'number' && (
-              <div className="text-gray-600 mt-0.5">置信 {Math.round(proposal.confidence * 100)}%</div>
-            )}
+            <div className="grid grid-cols-3 gap-1">
+              {[
+                ['goal_alignment', '契合'],
+                ['necessity', '必要'],
+                ['delay_cost', '延误'],
+              ].map(([key, label]) => (
+                <label key={key} className="text-gray-500">
+                  <span>{label}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={Math.round(proposal[key] * 100)}
+                    onChange={event => updateProposal(index, key, Math.max(0, Math.min(100, Number(event.target.value))) / 100)}
+                    disabled={applied}
+                    className="mt-0.5 w-full rounded border border-gray-700 bg-gray-950 px-1 py-0.5 text-gray-300"
+                  />
+                </label>
+              ))}
+            </div>
+            <select
+              value={proposal.relation_type}
+              onChange={event => updateProposal(index, 'relation_type', event.target.value)}
+              disabled={applied}
+              className="mt-1 w-full rounded border border-gray-700 bg-gray-950 px-1.5 py-1 text-gray-400"
+            >
+              <option value="normal">普通组成</option>
+              <option value="required">必要步骤</option>
+              <option value="enables">解锁后续</option>
+              <option value="supporting">辅助支持</option>
+              <option value="optional">可选路径</option>
+            </select>
+            <input
+              value={proposal.reason}
+              onChange={event => updateProposal(index, 'reason', event.target.value)}
+              disabled={applied}
+              placeholder="判断理由"
+              className="mt-1 w-full rounded border border-gray-800 bg-gray-950 px-1.5 py-1 text-gray-500 outline-none focus:border-violet-700"
+            />
           </div>
         ))}
       </div>
@@ -334,20 +404,25 @@ function WeightPlanCard({ thinking, applied, onApply }) {
   )
 }
 
-function normalizeWeightProposal(item) {
-  if (!item || typeof item !== 'object') return String(item)
-  const rawShare = item.suggested_share ?? item.suggested_weight ?? item.weight ?? item.share
-  const numericShare = typeof rawShare === 'string'
-    ? Number(rawShare.replace('%', '').trim())
-    : rawShare
-  const share = Number.isFinite(numericShare)
-    ? (numericShare > 2 ? numericShare / 100 : numericShare)
-    : null
+function normalizePriorityProposal(item) {
   return {
-    name: item.name || item.branch_name || '未命名分支',
-    share,
-    confidence: typeof item.confidence === 'number' ? item.confidence : null,
+    name: item?.name || '未命名节点',
+    node_id: item?.node_id || item?.id || null,
+    goal_alignment: clampUnit(item?.goal_alignment),
+    necessity: clampUnit(item?.necessity),
+    delay_cost: clampUnit(item?.delay_cost),
+    relation_type: ['normal', 'required', 'enables', 'supporting', 'optional'].includes(item?.relation_type)
+      ? item.relation_type
+      : 'normal',
+    confidence: clampUnit(item?.confidence ?? 0.5),
+    reason: item?.reason || '',
   }
+}
+
+function clampUnit(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.min(1, numeric))
 }
 
 function ListRow({ label, items, valueColor = 'text-gray-300' }) {
@@ -416,7 +491,7 @@ const MODEL_OPTIONS = [
 
 export default function ChatPanel({
   messages, isLoading, onSend, isOpen,
-  goalText, goalExpired, onSetGoal, onClearGoal,
+  goalText, goalExpired, onClearGoal,
   model, onModelChange,
   onResetConversation,
   onOpenHistory, onOpenLearned, onOpenRecommendations,
@@ -424,7 +499,7 @@ export default function ChatPanel({
   treeData, onHoverNode,
   onTriggerReview, reviewGenerating,
   onRetry,
-  onCancel, onApplyDraftPlan, onApplyWeightPlan, pendingCount,
+  onCancel, onApplyDraftPlan, onApplyPriorityAnalysis, pendingCount,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -454,7 +529,7 @@ export default function ChatPanel({
       if (!body || body === 'clear' || body === '清除') {
         onClearGoal?.()
       } else {
-        onSetGoal?.(body)
+        onSend(`请把我的当前目标设为：${body}。先拆解目标和相关节点优先级，等我确认后再应用。`)
       }
       return true
     }
@@ -504,7 +579,7 @@ export default function ChatPanel({
     if (next === null) return        // 取消
     const trimmed = next.trim()
     if (!trimmed) { onClearGoal?.(); return }
-    onSetGoal?.(trimmed)
+    onSend(`请把我的当前目标设为：${trimmed}。先拆解目标和相关节点优先级，等我确认后再应用。`)
   }
 
   return (
@@ -640,10 +715,10 @@ export default function ChatPanel({
                   />
                 )}
                 {msg.role === 'assistant' && msg.thinking && (
-                  <WeightPlanCard
+                  <PriorityAnalysisCard
                     thinking={msg.thinking}
-                    applied={!!msg.applied_weight_plan}
-                    onApply={onApplyWeightPlan ? () => onApplyWeightPlan(msg.id) : null}
+                    applied={!!msg.applied_priority_analysis}
+                    onApply={onApplyPriorityAnalysis ? overrides => onApplyPriorityAnalysis(msg.id, overrides) : null}
                   />
                 )}
                 {msg.role === 'assistant' && msg.thinking && (

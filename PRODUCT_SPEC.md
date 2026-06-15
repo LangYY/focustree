@@ -1,6 +1,6 @@
 # FocusTree 产品说明
 
-> 最后更新：2026-05-17
+> 最后更新：2026-06-15
 >
 > 本文说明当前 FocusTree 的产品逻辑、核心用户流程和核心算法边界。它不是未来路线图，而是当前仓库实现的产品定义。
 
@@ -33,9 +33,10 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 每个节点有：
 
 - `status`：`active`、`done`、`dormant`
-- `weight`：同级分支的当前精力配比
+- `current_priority`：用户可选的当下优先级，是强信号但不是最终分数
+- `target_completion_date`：用户可选的目标完成日期
 - `expanded`：折叠展开状态
-- `annotations`：AI 或用户给出的策略标签
+- `annotations`：AI 或用户给出的策略标签，以及经用户确认的优先级分析
 
 产品原则是：用户能直接编辑树，AI 也能通过受控 action 修改树，但所有修改最终都落到同一套节点数据里。
 
@@ -45,7 +46,7 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 
 - “把第 2 集脚本标完成”
 - “在熊猫团团下加任务剪辑第 1 集”
-- “把现金流补位调到 40%”
+- “把现金流补位设为紧急”
 - “删除旧项目”
 
 这些由本地确定性算法直接执行。AI 助理真正负责的是：
@@ -53,7 +54,7 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 - 用户说“我现在有点乱”时，拆出主线、冲突、约束和下一步。
 - 用户问“我该做什么”时，结合目标、树、时间和历史命中率做取舍。
 - 用户输入一段项目材料时，保留原意、合并重复、补出合理层级。
-- 用户需要权重方案时，提出可讨论的精力配比草案，而不是替用户决定。
+- 用户需要优先级分析时，只提出可核查的语义判断，等待用户确认后再由本地算法计算。
 
 这使 AI 的入口从“智能增删改”升级为“帮助用户形成判断”。
 
@@ -67,29 +68,19 @@ FocusTree 的产品核心是：把用户的混乱输入转成可讨论、可执�
 
 产品上要避免一种错误：因为当前目标偏向某条主线，就擅自删掉、弱化或改写用户刚刚表达的其他真实压力。
 
-### 2.4 权重表示精力配比，不表示价值高低
+### 2.4 优先级不是同级配比
 
-`nodes.weight` 当前被解释为“同一父节点下分支的当前精力配比”。
+Priority Engine V2 不再把项目解释为同一父节点下相加为 100% 的精力份额，也不再使用逐层累计流量。系统分别计算三种互不替代的数据：
 
-重要语义：
+- `directPriority`：节点自身此刻有多值得处理，范围 0-100。
+- `branchPriority`：节点自身与其关键后代形成的最终枝干意义，使用关键路径传播，不对子节点求和。
+- `cultivationScore`：用户在该节点及后代投入和展开的程度，不等于理性优先级。
 
-- 权重不是价值判断。
-- 低权重不代表应该删除。
-- 低权重只表示当前阶段推荐频率更低。
-- 同一父节点下的核心分支建议总和约等于 100%。
-- 普通 task 默认不设权重，除非用户明确要求。
+直接优先级综合用户设置、目标契合、必要性、延误损失和期限压力。用户优先级是强信号，但完成会使当前优先级归零，暂停会显著压低结果，明确现实信号也可以修正它。
 
-AI 在梳理全局时会输出权重草案，但不会立即写入。用户需要点击“应用权重方案”或明确确认后，才会归一化并写入 `nodes.weight`。`nodes.weight` 是输入之一，不是整套算法的唯一事实来源；显示、推荐和 AI 上下文都使用运行时派生的节点 meta。
+后代只沿自己的祖先路径传播意义。增加、复制普通子节点不会虚增父项目分数；插入不承载新语义的中间层也不改变关键路径结果。完成节点退出当前优先级，但仍保留培育痕迹。
 
-所有 AI 生成的子节点都会写入 `weight`。如果模型没有在 `add_category` / `add_task` action 里显式给出权重，客户端执行前会按同一父节点下的生成草案自动补齐：优先读取 annotations、紧急词、现金流/交付信号和动作具体度；只有完全没有差异信号时才均分。
-
-视觉上，树枝线宽按从根节点流到当前节点的累计精力流量映射，而不是只看当前节点的局部权重。每一层分叉都会继续分流：`child_flow = parent_flow * local_share`。如果某个节点只有一个子节点，子节点继承父节点流量；只有出现多个子分支时，线条才继续变细。
-
-`local_share` 优先使用用户确认过的同级权重；如果同级子节点还没有明确权重，或同级权重明显是自动补齐的均分值，前端会用节点 meta 重新派生本级配比。节点 meta 包括 `branch_pressure`、`goal_fit`、`completeness`、`missing_slots`、`urgency` 和 `recommendation_rank`。这样项目内部即使还没有二级权重方案，也能根据真实结构、任务负载和缺口呈现差异。
-
-节点悬浮和末端视图默认展示 `flow` 作为有效权重，避免子节点只有一个同级分支时全部显示为 100%。需要手动调整时，右键菜单仍写入该节点在同一父节点下的本级配比。
-
-权重计算会同时结合 top-down 信号（目标、偏好、约束）和 bottom-up 信号（任务压力、阻塞、紧急性），但这只是内部计算依据。前端默认只展示最终精力配比，不把两端推导过程逐条展示给用户。
+AI 不输出最终分数、百分比或同级配比。AI 只输出 `goal_alignment`、`necessity`、`delay_cost`、`relation_type`、`confidence` 和可核查解释。用户在对话卡片中修正、确认后，本地确定性算法才使用这些信号。
 
 ## 3. 主要用户流程
 
@@ -118,14 +109,15 @@ AI 需要识别这不是一组平级任务，而是三条主线：
 - `situation_map`：主线和冲突
 - `proposed_panel_changes`：建议落到面板的结构
 - `draft_actions`：可延后执行的结构草案
-- `branch_weight_proposals`：可讨论的精力配比草案
+- `goal_analysis`：目标期限、约束和排除项的结构化草案
+- `node_priority_proposals`：节点目标契合、必要性、延误损失和关系类型草案
 
 前端展示草案卡片，等待用户确认。
 
 草案确认有两个入口：
 
 - 点击“应用到面板”：应用 `draft_actions`，创建结构草案。
-- 点击“应用权重方案”：应用 `branch_weight_proposals`，归一化并写入权重。
+- 点击“确认并应用”：保存目标版本和经确认的节点分析，再由本地算法计算优先级。
 
 用户输入“确认 / 按这个 / 加到面板 / 就这样”等短确认时，也走本地确认逻辑，不再调用模型。应用前会检查面板中是否已有同名同父节点，避免重复创建。
 
@@ -212,8 +204,8 @@ Agent 输出必须是 JSON，核心字段：
 - `open_questions`
 - `proposed_panel_changes`
 - `goal_usage_mode`
-- `weight_strategy`
-- `branch_weight_proposals`
+- `goal_analysis`
+- `node_priority_proposals`
 - `preserved_inputs`
 - `merged_duplicates`
 - `deferred_or_unsure`
@@ -240,13 +232,13 @@ Agent 输出必须是 JSON，核心字段：
 
 为减少模型输出随机性，Agent prompt 里不只写“应该怎么回答”，还要求模型按固定顺序完成内部判断：
 
-1. 先判定本轮意图：机械操作、全局梳理、建树落地、推荐排序、权重确认或普通想法。
+1. 先判定本轮意图：机械操作、全局梳理、建树落地、推荐排序、优先级确认或普通想法。
 2. 从用户原文抽取输入保全清单，放入 `preserved_inputs`，不得先按目标筛掉内容。
 3. 决定阶段目标使用方式：`background`、`priority_filter` 或 `ignored`。
 4. 将保全清单映射为 `project/category/task/annotation/open_question`。
 5. 做覆盖性自检：用户明确提到的非重复顶层项目，必须出现在当前树、`actions`、`draft_actions` 或 `proposed_panel_changes` 中。
 6. 只合并同义或明显重复项，写入 `merged_duplicates`。
-7. 多主线时只给权重草案，不直接写入权重。
+7. 需要分析优先级时只给语义信号，不直接计算或写入最终分数。
 8. 不确定时使用粗颗粒节点和 `open_questions`，不编造细节。
 9. 最后检查 `reply`、`thinking`、`actions` 是否一致。
 
@@ -266,7 +258,7 @@ Agent 输出必须是 JSON，核心字段：
 
 本地算法会先于模型路由执行，所以最常见的机械操作不会进入 LLM。
 
-### 4.4 权重协商与应用算法
+### 4.4 目标与优先级确认算法
 
 入口：
 
@@ -278,25 +270,23 @@ AI 输出：
 
 ```json
 {
-  "weight_strategy": {
-    "mode": "energy_allocation",
-    "scope": "top_level",
-    "normalization_parent": "root",
-    "conflict_note": "",
-    "requires_clarification": false
+  "goal_analysis": {
+    "outcome": "本季度建立稳定现金流",
+    "kind": "stage",
+    "deadline": "2026-06-30",
+    "constraints": [],
+    "exclude": []
   },
-  "branch_weight_proposals": [
+  "node_priority_proposals": [
     {
-      "name": "内容资产",
-      "node_id": null,
-      "parent_name": "root",
-      "suggested_share": 0.4,
-      "top_down_score": 0.8,
-      "bottom_up_score": 0.45,
-      "top_down_reason": "目标相关度高",
-      "bottom_up_reason": "短期回报慢",
-      "confidence": 0.6,
-      "requires_confirmation": true
+      "name": "完成客户回款",
+      "node_id": "t-101",
+      "goal_alignment": 0.9,
+      "necessity": 1,
+      "delay_cost": 0.85,
+      "relation_type": "required",
+      "confidence": 0.8,
+      "reason": "回款是当前现金流目标不可绕过的末端步骤"
     }
   ]
 }
@@ -304,15 +294,14 @@ AI 输出：
 
 应用步骤：
 
-1. 用户点击“应用权重方案”。
-2. 如果 `requires_clarification` 为 true 或存在冲突，先提示确认排序原则。
-3. 用真实 `node_id` 或节点名解析目标节点。
-4. 如果草案节点尚未创建，执行允许的 `draft_actions`；如果已存在则跳过，避免重复创建。
-5. 按 `normalization_parent` 分组。
-6. 每组内部把 `suggested_share` 归一化到 100%。
-7. 调用 `updateWeight(node.id, normalizedWeight)` 写入 `nodes.weight`。
-8. 前端按逐级累计流量刷新树枝线宽。
-9. 当前消息标记为已应用，避免重复点击。
+1. 用户在对话卡片中修正目标、信号或解释并点击“确认并应用”。
+2. 新目标替换当前目标，旧目标写入 `goal_history`；没有期限的目标默认为长期目标。
+3. 用真实 `node_id` 校验所有分析对象，不允许给草案节点编造分析。
+4. 将确认数据、目标版本和节点指纹写入 `node_annotations.priority_analysis`。
+5. 本地引擎计算直接优先级、关键路径传播和培育程度。
+6. 目标或节点关键字段变化后，旧分析标记为过期并回退到本地信号。
+7. 将原始提案和确认后的内容写入 `priority_analysis_runs`，用于审计。
+8. 当前消息标记为已应用，避免重复点击。
 
 ### 4.5 推荐闭环算法
 
@@ -377,8 +366,8 @@ FocusTree 采用四层记忆：
 
 - Supabase flat rows 先通过 `flatToTree` 转成树。
 - D3 `hierarchy` + `tree` 计算布局。
-- link 粗细由 `getLinkStrokeWidth(flow)` 决定；`flow` 是 root 到目标节点的累计精力流量。每条 link 还带有 `data-flow`、`data-local-share`、`data-branch-pressure`，方便测试权重分配。
-- 派生节点状态由 `computeTreeNodeMetaMap(tree, { userGoal })` 统一计算；树枝、tooltip、末端视图和 AI prompt 共用同一套 `local_share` / `flow` / `branch_pressure` / `completeness` / `recommendation_rank`，避免显示和推荐上下文不一致。
+- link 粗细暂时由 `branchPriority` 映射，作为 UI 阶段开始前的兼容展示；它不再表达同级百分比或累计流量。
+- 派生节点状态由 `computePriorityMetaMap(tree, { goal })` 统一计算；树枝、tooltip、末端视图、调试视图和 AI prompt 共用 `directPriority` / `branchPriority` / `cultivationScore`。
 - 节点颜色由 type 和 status 决定。
 
 交互：
@@ -410,9 +399,10 @@ FocusTree 采用四层记忆：
 - updateStatus
 - deleteNode
 - clearAll
-- updateWeight
 - moveNode
 - annotateNode
+- updateNodePlanning
+- applyPriorityAnalyses
 
 撤销机制：
 
@@ -536,7 +526,7 @@ V1 暂不做：
 1. 当前树是唯一真实状态。
 2. 明确命令交给代码，模糊判断交给 AI。
 3. AI 负责协商和解释，用户负责确认重要决策。
-4. 权重是当前阶段精力配比，不是价值排序。
+4. 优先级、枝干意义和培育程度必须分开表达，不能伪装成同级百分比。
 5. 推荐必须能追踪 outcome。
 6. 长期记忆必须可见、可删、可纠错。
 7. 破坏性操作尽量可撤销，并在必要时先备份。

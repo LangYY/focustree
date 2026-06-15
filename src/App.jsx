@@ -11,6 +11,7 @@ import LearnedPatternsPanel from './components/Chat/LearnedPatternsPanel'
 import RecommendationLogPanel from './components/Chat/RecommendationLogPanel'
 import TodayCard from './components/Tree/TodayCard'
 import NodeDetailPanel from './components/Tree/NodeDetailPanel'
+import PriorityDebugPanel from './components/Tree/PriorityDebugPanel'
 import BackupPanel from './components/Modals/BackupPanel'
 import { useTree } from './hooks/useTree'
 import { useChat } from './hooks/useChat'
@@ -41,6 +42,7 @@ export default function App() {
   const [learnedOpen, setLearnedOpen] = useState(false)
   const [recsOpen,    setRecsOpen]    = useState(false)
   const [backupOpen,  setBackupOpen]  = useState(false)
+  const [priorityDebugOpen, setPriorityDebugOpen] = useState(false)
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
   const [selectedNodeId, setSelectedNodeId] = useState(null)
   const resetZoomRef              = useRef(null)
@@ -90,7 +92,7 @@ export default function App() {
     density, setDensity,
     leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, annotateNode, updateNodeDetails, updateNodePlanning, updateWeight, moveNode, reorderNode,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, annotateNode, updateNodeDetails, updateNodePlanning, moveNode, reorderNode, applyPriorityAnalyses,
     history, future, canUndo, canRedo, lastAction, nextAction, undo, redo,
   } = useTree(user)
 
@@ -124,7 +126,8 @@ export default function App() {
     addNode, renameNode, updateStatus,
     deleteNode: guardedDeleteNode,
     clearAll: guardedClearAll,
-    annotateNode, updateNodeDetails, updateWeight, expandAll, collapseAll,
+    annotateNode, updateNodeDetails, expandAll, collapseAll,
+    applyPriorityAnalyses, setGoal,
   }
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
@@ -134,7 +137,7 @@ export default function App() {
     recommendations, hitRate, reloadRecommendations,
     recentSummaries,
     injectReviewMessage,
-    applyWeightPlan,
+    applyPriorityAnalysis,
     applyDraftPlan,
   } = useChat(user, treeActions, goal, model)
 
@@ -198,24 +201,6 @@ export default function App() {
     if (action === 'status') {
       await updateStatus(node.id, status)
     }
-    if (action === 'weight') {
-      const localShare = Number.isFinite(Number(node.__localShare ?? node.weight))
-        ? Math.max(0, Math.min(1, Number(node.__localShare ?? node.weight)))
-        : 1
-      const effectiveShare = Number.isFinite(Number(node.__flow))
-        ? Math.max(0, Math.min(1, Number(node.__flow)))
-        : localShare
-      const current = Math.round(localShare * 100)
-      const effective = Math.round(effectiveShare * 100)
-      const input = window.prompt(
-        `调整「${node.name}」的本级配比 (0-100)：\n当前有效权重约 ${effective}%。`,
-        current
-      )
-      if (input !== null) {
-        const w = Math.max(0, Math.min(100, parseInt(input) || 0))
-        await updateWeight(node.id, w / 100)
-      }
-    }
     if (action === 'delete') {
       if (!confirmRiskyDelete(node, treeData, goal)) return
       await guardedDeleteNode(node.id)
@@ -226,7 +211,7 @@ export default function App() {
       setSelectedNodeId(nextSelection)
       setHighlightedNodeId(nextSelection)
     }
-  }, [updateStatus, guardedDeleteNode, deleteNodeOnly, updateWeight, treeData, goal, createDefaultNode])
+  }, [updateStatus, guardedDeleteNode, deleteNodeOnly, treeData, goal, createDefaultNode])
 
   const deleteSelectedNode = useCallback(async () => {
     if (!selectedNode || selectedNode.type === 'root') return
@@ -323,6 +308,8 @@ export default function App() {
         future={future}
         onOpenBackup={() => setBackupOpen(true)}
         backupWarning={backupWarning}
+        priorityDebugOpen={priorityDebugOpen}
+        onTogglePriorityDebug={() => setPriorityDebugOpen(value => !value)}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -390,6 +377,14 @@ export default function App() {
           onStatusChange={updateStatus}
         />
 
+        {priorityDebugOpen && (
+          <PriorityDebugPanel
+            treeData={treeData}
+            goal={goal}
+            onClose={() => setPriorityDebugOpen(false)}
+          />
+        )}
+
         <ChatPanel
           messages={messages}
           isLoading={chatLoading}
@@ -413,7 +408,7 @@ export default function App() {
           onRetry={() => retryLastMessage(treeData, { selectedNodeId })}
           onCancel={cancelRequest}
           onApplyDraftPlan={(messageId) => applyDraftPlan(messageId, treeData)}
-          onApplyWeightPlan={(messageId) => applyWeightPlan(messageId, treeData)}
+          onApplyPriorityAnalysis={(messageId, overrides) => applyPriorityAnalysis(messageId, overrides, treeData)}
           pendingCount={pendingQueue.length}
         />
       </div>
@@ -515,12 +510,11 @@ function getDeleteRisk(node, treeData, goal) {
 }
 
 function readDeleteShare(node, treeData, goal) {
-  if (Number.isFinite(Number(node?.__flow))) return Number(node.__flow)
-  if (Number.isFinite(Number(node?.__localShare))) return Number(node.__localShare)
+  if (Number.isFinite(Number(node?.__branchPriority))) return Number(node.__branchPriority) / 100
   if (!treeData || !node?.id) return null
   const metaById = getDerivedWeightMetaMap(treeData, { userGoal: goal })
   const meta = getDerivedWeightMeta(metaById, node)
-  return Number.isFinite(Number(meta?.flow)) ? Number(meta.flow) : null
+  return Number.isFinite(Number(meta?.branchPriority)) ? Number(meta.branchPriority) / 100 : null
 }
 
 function countDescendants(node) {

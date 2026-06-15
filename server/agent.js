@@ -20,7 +20,7 @@ const MAX_RETRIES = 3
 const VALID_TYPES = [
   'mark_done', 'mark_active', 'mark_dormant',
   'add_task', 'add_category', 'add_project',
-  'rename', 'delete', 'clear_all', 'set_weight',
+  'rename', 'delete', 'clear_all',
   'annotate',                     // 给已有节点打/改策略标签
   'remember',                     // 写入 learned_patterns（长期画像）
 ]
@@ -283,13 +283,13 @@ ${trimmedTree}
 ## 稳定思考协议（必须按顺序执行，降低模型随机性）
 以下步骤是内部工作协议，不要把长链路原样写给用户；只把结论压缩进 brief_rationale、situation_map、preserved_inputs 等字段。
 
-1. 意图闸门：先判断用户是在“机械操作 / 全局梳理 / 建树落地 / 推荐排序 / 权重确认 / 普通想法记录”中的哪一种。只有用户明确要求改树，或语义等价于“放到面板/建出来/确认应用”，才输出 actions；否则 actions 必须为空。
+1. 意图闸门：先判断用户是在“机械操作 / 全局梳理 / 建树落地 / 推荐排序 / 目标或优先级分析 / 普通想法记录”中的哪一种。只有用户明确要求改树，或语义等价于“放到面板/建出来/确认应用”，才输出 actions；否则 actions 必须为空。
 2. 输入保全清单：从用户原文抽取所有明确提到的项目、任务、约束、情绪压力、时间节点和偏好，去重后放入 preserved_inputs。不得先按目标筛掉内容。
 3. 目标使用闸门：根据本轮意图选择 goal_usage_mode。全局梳理用 background，推荐排序用 priority_filter，用户要求先完整梳理时用 ignored。目标只能影响解释和排序，不能删除或改写用户明确表达。
 4. 结构映射：把 preserved_inputs 映射为 project/category/task/annotation/open_question。顶层项目先保全，项目内部细节再压缩；缺少执行细节时保留粗颗粒 project，并用 open_questions 或 task「明确下一步」承接。
 5. 覆盖性自检：生成回复前逐项检查 preserved_inputs 中的每个非重复项目是否出现在 actions、draft_actions、proposed_panel_changes 或当前树中。若没有，必须补上；不能把顶层项目只放进 deferred_or_unsure。
 6. 重复合并：只合并同义或明显重复项，写入 merged_duplicates。不要把“执行少”“兴趣项目”“暂时不赚钱”当作重复或删除理由。
-7. 权重闸门：如果出现多个同级主线，只给 branch_weight_proposals，不直接 set_weight。权重数值必须融合 top-down 与 bottom-up 两端信号；这两端只用于计算和结构化审计，不要在 reply 里展示推理过程。
+7. 优先级分析闸门：你不计算最终权重或百分比。用户设置目标、要求分析优先级或目标发生变化时，只输出 goal_analysis 和 node_priority_proposals，等待用户确认。本地算法会据此计算最终分数。
 8. 不确定性闸门：证据不足时不要编任务细节；弱模型也应选择更粗颗粒节点 + open_questions，而不是胡乱补全。需要用户判断的问题最多 3 个。
 9. 输出自检：reply 必须和 actions/thinking 一致；不能说“已落地”却 actions 为空；用户明确提到的项目必须能在结构草案或面板变更说明里找到对应位置；不能输出 schema 外文字。
 
@@ -306,8 +306,8 @@ ${trimmedTree}
     "draft_actions":            [{"type":"add_project|add_category|add_task|annotate","name":"...","parent":"...","annotations":{}}],
     "goal_usage_mode":          "background" | "priority_filter" | "ignored",
     "goal_usage_reason":        "<本轮为什么这样使用阶段目标：只作背景 / 用来排序 / 不使用>",
-    "weight_strategy":          {"mode":"energy_allocation","scope":"top_level"|"nested","normalization_parent":"root|<父节点名>","conflict_note":"<目标与现实压力冲突时填写；无则空字符串>","requires_clarification":false},
-    "branch_weight_proposals":  [{"name":"<项目/分支名>","node_id":"<已有节点 id；新草案可为 null>","parent_name":"root|<父节点名>","suggested_share":0-1,"top_down_score":0-1,"bottom_up_score":0-1,"top_down_reason":"<内部审计：目标/偏好/约束信号，不在回复里展示>","bottom_up_reason":"<内部审计：任务压力/阻塞/紧急性/情绪负担信号，不在回复里展示>","confidence":0-1,"requires_confirmation":true}],
+    "goal_analysis":           {"text":"<用户目标原文>","outcome":"<可验证成果>","kind":"stage"|"long_term","start_date":"YYYY-MM-DD或null","deadline":"YYYY-MM-DD或null","constraints":["..."],"exclude":["..."],"confidence":0-1,"requires_confirmation":true},
+    "node_priority_proposals": [{"name":"<已有节点名>","node_id":"<当前树中真实id>","goal_alignment":0-1,"necessity":0-1,"delay_cost":0-1,"relation_type":"normal"|"required"|"enables"|"supporting"|"optional","confidence":0-1,"reason":"<一句可核查解释>"}],
     "preserved_inputs":         ["<用户提到且被保留下来的主线/任务，去重后列出>"],
     "merged_duplicates":        ["<被合并的重复/同义项，格式：A/B → C；无则空数组>"],
     "deferred_or_unsure":       ["<因信息不足、超过本轮节点上限或不确定而暂未展开的内容；无则空数组>"],
@@ -328,13 +328,12 @@ ${trimmedTree}
 { "type": "mark_done",    "id": "...", "name": "..." }
 { "type": "mark_active",  "id": "...", "name": "..." }
 { "type": "mark_dormant", "id": "...", "name": "..." }
-{ "type": "add_task",     "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }   // annotations 可选但鼓励；weight 不填时客户端会按同父级草案自动补齐
-{ "type": "add_category", "name": "...", "parent": "...", "weight": 0.0-2.0, "annotations": {...} }
-{ "type": "add_project",  "name": "...", "color": "#hex", "weight": 0.0-2.0, "annotations": {...} }  // weight 默认 1.0；非用户确认的权重方案不要主动设置
+{ "type": "add_task",     "name": "...", "parent": "...", "annotations": {...} }
+{ "type": "add_category", "name": "...", "parent": "...", "annotations": {...} }
+{ "type": "add_project",  "name": "...", "color": "#hex", "annotations": {...} }
 { "type": "rename",       "id": "...", "name": "..." }
 { "type": "delete",       "id": "...", "name": "..." }
 { "type": "clear_all" }
-{ "type": "set_weight",   "id": "...", "name": "...", "weight": 0.0-2.0 }          // 仅用户明确要求/确认调整权重时使用
 { "type": "annotate",     "id": "...", "annotations": {...} }                       // 给已有节点打/改标签
 { "type": "remember",     "observation": "<一句话事实>", "confidence": 0.0-1.0, "topic": "<分类标签>" }  // 记入长期画像
 
@@ -381,8 +380,8 @@ ${trimmedTree}
 - 全局梳理/建树落地默认保留用户提到的主线和已说出的具体事项；只有用户明确要求“聚焦/压缩/只留重点”时，才减少内部展开深度。
 - reply 要有重点、有条理：一句判断逻辑 + 2-4 条主线 + 合并/暂缓说明。不要只说「已添加」。
 - thinking.brief_rationale 要给用户一眼能懂的简短思考过程，但不要输出长篇链式推理。
-- actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations。不要擅自设置非默认 weight，除非用户明确要求“按优先级/权重建”。
-- 生成 add_category / add_task 子节点时，如能确定同父级精力配比，可写 weight；不确定时可省略，客户端会按同父级生成草案自动补齐，保证每个生成子节点入库时都有 weight。
+- actions 要体现层级和优先级；能判断现金流/资产积累/探索时，给 annotations。不要生成或修改 weight。
+- 新节点的优先级语义要等节点真实创建并获得 id 后再分析，不要给草案节点编造 node_priority_proposals。
 - 不确定的信息不要硬编，放成较粗颗粒的 category，等用户补充后再细化。
 
 ## 「我该做什么 / 优先级 / 规划」类问题的核心规则
@@ -397,34 +396,17 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 
 问"今天做哪几件事"时：reply 列 3 条（任务名 + 一句理由），next_concrete_step 写第一件事的动作。
 
-## 权重（w:N% / flow:N%）的含义
-树中每个节点后都有 (w:N%) 表示同级分支的当前精力配比；如果同时出现 flow:N%，它表示从根节点流到该节点的累计有效权重。推荐排序优先看 flow，同级取舍优先看 w。
-树中还会出现 pressure / complete / goal / rank / missing：
-- pressure 是该节点及子树的结构压力，来自未完成任务、紧急度、阻塞、现金流等底层信号
-- complete 是结构完整度；missing 是还缺的结构槽位。缺槽位不代表要删除，而是提示应该补全
-- goal 是当前阶段目标匹配度。全局梳理时它只作背景；推荐排序时才作为强筛选
-- rank 是本地算法综合 flow、pressure、goal、urgency、complete 后的推荐分
-- 权重不是价值判断，不表示低权重分支“不重要”或“该删除”
-- 同一父节点下的核心分支，权重建议总和应接近 100%
-- 推荐时可优先考虑高权重分支下的活跃 task，但不能因此无视用户刚刚明确提出的内容
-- 权重范围 0-100%。默认 100% 表示“尚未协商过的单独分支”，不是强优先级
-
-## 分支权重协商规则
-- 权重是协商出来的，不是你替用户决定的。除非用户明确说“调整权重 / 按这个权重执行 / 就这样设置”，否则不要在 actions 里发 set_weight。
-- 梳理全局时，如果出现多个顶层项目/分支，必须在 thinking.weight_strategy + thinking.branch_weight_proposals 里给“精力配比草案”。
-- 权重不是把 top-down / bottom-up 当作展示给用户的推理标题；它们是计算权重的两端输入。
-- 计算方式：先分别评估 top_down_score 和 bottom_up_score（0-1），再综合为 suggested_share。默认可按 top_down_score 55% + bottom_up_score 45% 得到初始分，再在同一父节点下归一化为 100%。
-  - top-down 输入：阶段目标、用户明确偏好、现金流/安全感约束、当前主线方向
-  - bottom-up 输入：已有任务数量、阻塞关系、紧急性、停滞风险、明确下一步数量、情绪压力
-- top_down_reason / bottom_up_reason 只作为内部审计字段，不要在 reply、brief_rationale、proposed_panel_changes 里用“自上而下/自下而上”向用户解释。
-- 如果目标偏 A，但用户的现金流/安全感/底层任务压力指向 B，不要把 B 压低；在 weight_strategy.conflict_note 里说明冲突。
-- 如果冲突已经足以给出可讨论草案，requires_clarification 为 false；如果必须先确认排序原则，requires_clarification 为 true，且不要输出可立即应用的 set_weight。
-- 默认 scope 为 "top_level"，只给顶层主线分配权重；只有用户在某个项目内部梳理多个方向时，scope 才用 "nested"。
-- 不给普通 task 默认设权重，除非用户明确要求。
-- 新建项目时默认不写 weight 字段；权重草案只放在 branch_weight_proposals，等用户点“应用权重方案”或明确确认后再写入。
-- suggested_share 使用 0-1 小数，且同一 normalization_parent 下建议总和约等于 1。
-- 如果草案节点尚未创建，可把创建节点动作放入 thinking.draft_actions；用户应用权重方案时会先创建节点，再归一化并写入权重。
-- 用户确认后，才输出 set_weight actions；已有节点必须使用真实 id。
+## 目标与优先级语义分析
+- 最终综合优先级由本地确定性算法计算。你不得输出最终分数、权重百分比或同级配比。
+- 当用户明确设置/替换目标时，输出 goal_analysis。能识别时间就填 stage 与日期；没有明确时间就填 long_term，deadline 必须为 null，不要擅自补 90 天。
+- 新目标会替换当前目标，但必须先让用户在对话卡片中确认。
+- 用户要求分析优先级、目标变化影响或重新评估时，只对当前树中真实存在且确实相关的节点输出 node_priority_proposals。
+- goal_alignment：节点与当前目标的直接契合程度。
+- necessity：节点是否为达成目标的必要步骤；“最后回款”等不可绕过步骤应较高。
+- delay_cost：延迟执行造成损失的程度，不等同于任务数量或描述长度。
+- relation_type 描述该节点相对父节点的作用：required 必要步骤，enables 解锁后续，normal 普通组成，supporting 辅助，optional 可选。
+- 每项必须给一句 reason 和 confidence。信息不足就降低 confidence，不要为了显得完整而编造。
+- 当前目标变化后，旧分析会失效，因此相反目标应当导致相关节点的 goal_alignment 出现有方向的变化；若不变化，必须说明硬性截止日期等原因。
 
 ## remember Action 使用规则（关键！）
 
@@ -503,12 +485,6 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     ],
     "goal_usage_mode":"background",
     "goal_usage_reason":"用户是在梳理全局，不是在询问优先级；阶段目标不能覆盖他对收入和安全感的表达。",
-    "weight_strategy":{"mode":"energy_allocation","scope":"top_level","normalization_parent":"root","conflict_note":"目标可能偏内容资产，但收入焦虑让现金流补位不能被压低。"},
-    "branch_weight_proposals":[
-      {"name":"内容资产","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_score":0.8,"bottom_up_score":0.45,"top_down_reason":"长期资产主线，和内容积累目标贴近","bottom_up_reason":"短期回报慢，不能吃掉全部精力","confidence":0.6,"requires_confirmation":true},
-      {"name":"现金流补位","node_id":null,"parent_name":"root","suggested_share":0.4,"top_down_score":0.75,"bottom_up_score":0.9,"top_down_reason":"现金流是当前约束，不解决会影响主线稳定","bottom_up_reason":"用户明确担心收入，短期减压优先级高","confidence":0.7,"requires_confirmation":true},
-      {"name":"求职安全垫","node_id":null,"parent_name":"root","suggested_share":0.2,"top_down_score":0.35,"bottom_up_score":0.45,"top_down_reason":"提供安全感，但不是当前主线","bottom_up_reason":"低频推进可提供安全感，避免完全失控","confidence":0.5,"requires_confirmation":true}
-    ],
     "preserved_inputs":["熊猫团团","没收入的担心","接外包","找工作"],
     "merged_duplicates":[],
     "deferred_or_unsure":["三条线里信息不足的部分先用问题承接，等用户确认当前最缺的资源后再细化"]
@@ -522,9 +498,6 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
 输入: 「把所有东西都清空」
 输出: {"intent":"action","reply":"已清空。（可撤销）","actions":[{"type":"clear_all"}]}
 
-输入: 「就按你刚才的建议，把内容资产调到80%，现金流补位调到90%」，树中有 [project] 内容资产 (id:p-201)、[project] 现金流补位 (id:p-202)
-输出: {"intent":"action","reply":"已按确认调整两个分支权重。","actions":[{"type":"set_weight","id":"p-201","name":"内容资产","weight":0.8},{"type":"set_weight","id":"p-202","name":"现金流补位","weight":0.9}]}
-
 输入（目标=「Q2 月入 15k 自由职业 + 重启 B 站频道」）：「我该做什么？」，树中有「接咨询单 t-101」「剪辑第3集 t-102」「整理简历 t-103」
 输出: {
   "intent":"query",
@@ -536,7 +509,6 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "leverage_insight":"咨询单的反哺素材可以作为 B 站内容",
     "goal_usage_mode":"priority_filter",
     "goal_usage_reason":"用户询问现在该做什么，阶段目标应用来排序和取舍。",
-    "branch_weight_proposals":[],
     "next_concrete_step":"打开接单平台，筛选 3 个匹配的咨询需求",
     "success_criterion":"今天至少对 1 个咨询需求发出响应",
     "risk_if_skipped":"收入真空期延长，本月现金流目标落空",
@@ -629,12 +601,6 @@ reply 末尾只在给出推荐时标注对齐情况（[对齐目标] 或 [偏离
     "proposed_panel_changes":["已落地：B站频道 > 熊猫团团 > 写脚本/画分镜/配音","已落地：求职 > 更新简历/刷算法题","已落地：副业接外包"],
     "goal_usage_mode":"background",
     "goal_usage_reason":"本轮任务是把用户材料完整转成面板结构，而不是替用户做优先级取舍。",
-    "weight_strategy":{"mode":"energy_allocation","scope":"top_level","normalization_parent":"root","conflict_note":"副业接外包信息不足，但它代表现金流压力，不能被长期内容目标完全压低。"},
-    "branch_weight_proposals":[
-      {"name":"B站频道","node_id":null,"parent_name":"root","suggested_share":0.45,"top_down_score":0.85,"bottom_up_score":0.7,"top_down_reason":"长期内容资产，需持续推进","bottom_up_reason":"已有脚本、分镜、配音三件明确下一步","confidence":0.6,"requires_confirmation":true},
-      {"name":"求职","node_id":null,"parent_name":"root","suggested_share":0.25,"top_down_score":0.45,"bottom_up_score":0.55,"top_down_reason":"安全垫重要，但不应抢掉全部主线","bottom_up_reason":"已有简历和刷题两个明确动作","confidence":0.5,"requires_confirmation":true},
-      {"name":"副业接外包","node_id":null,"parent_name":"root","suggested_share":0.3,"top_down_score":0.65,"bottom_up_score":0.45,"top_down_reason":"现金流补位能稳定整体计划","bottom_up_reason":"缺客户和交付物信息，先保留中等配比","confidence":0.5,"requires_confirmation":true}
-    ],
     "preserved_inputs":["B站频道","熊猫团团系列","写脚本","画分镜","配音","找工作","更新简历","刷算法题","副业接外包"],
     "merged_duplicates":[],
     "deferred_or_unsure":["副业接外包暂未拆成具体任务，因为还缺客户、报价或交付物信息"],
@@ -954,9 +920,58 @@ function normalizeOutput(data) {
   return {
     intent:   data.intent,
     reply:    data.reply,
-    thinking: data.thinking || null,
+    thinking: normalizeThinking(data.thinking),
     actions,
   }
+}
+
+function normalizeThinking(thinking) {
+  if (!thinking || typeof thinking !== 'object') return null
+  const next = { ...thinking }
+  if (next.goal_analysis && typeof next.goal_analysis === 'object') {
+    const goal = next.goal_analysis
+    next.goal_analysis = {
+      text: String(goal.text || '').trim(),
+      outcome: String(goal.outcome || goal.text || '').trim(),
+      kind: goal.kind === 'stage' ? 'stage' : 'long_term',
+      start_date: normalizeDate(goal.start_date),
+      deadline: normalizeDate(goal.deadline),
+      constraints: Array.isArray(goal.constraints) ? goal.constraints.filter(Boolean).map(String) : [],
+      exclude: Array.isArray(goal.exclude) ? goal.exclude.filter(Boolean).map(String) : [],
+      confidence: clampUnit(goal.confidence ?? 0.5),
+      requires_confirmation: true,
+    }
+    if (!next.goal_analysis.deadline && !next.goal_analysis.start_date) next.goal_analysis.kind = 'long_term'
+  }
+  next.node_priority_proposals = Array.isArray(next.node_priority_proposals)
+    ? next.node_priority_proposals.map(proposal => ({
+        name: String(proposal?.name || '').trim(),
+        node_id: proposal?.node_id || proposal?.id || null,
+        goal_alignment: clampUnit(proposal?.goal_alignment),
+        necessity: clampUnit(proposal?.necessity),
+        delay_cost: clampUnit(proposal?.delay_cost),
+        relation_type: ['normal', 'required', 'enables', 'supporting', 'optional'].includes(proposal?.relation_type)
+          ? proposal.relation_type
+          : 'normal',
+        confidence: clampUnit(proposal?.confidence ?? 0.5),
+        reason: String(proposal?.reason || '').trim(),
+      })).filter(proposal => proposal.node_id)
+    : []
+  delete next.weight_strategy
+  delete next.branch_weight_proposals
+  return next
+}
+
+function clampUnit(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.min(1, numeric))
+}
+
+function normalizeDate(value) {
+  if (!value) return null
+  const text = String(value).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null
 }
 
 function normalizeAnnotations(ann) {
@@ -1009,6 +1024,17 @@ function validateOutput(data, nodeIdSet) {
     errors.push('thinking 必须是 object 或 null')
   }
 
+  for (const [index, proposal] of (data.thinking?.node_priority_proposals || []).entries()) {
+    if (!proposal.node_id || (nodeIdSet?.size && !nodeIdSet.has(proposal.node_id))) {
+      errors.push(`thinking.node_priority_proposals[${index}].node_id 必须是当前树中真实 id`)
+    }
+    for (const key of ['goal_alignment', 'necessity', 'delay_cost', 'confidence']) {
+      if (typeof proposal[key] !== 'number' || proposal[key] < 0 || proposal[key] > 1) {
+        errors.push(`thinking.node_priority_proposals[${index}].${key} 必须是 0-1 数字`)
+      }
+    }
+  }
+
   if (!Array.isArray(data.actions)) {
     errors.push('actions 必须是数组')
     return { ok: false, errors }
@@ -1046,7 +1072,7 @@ function validateOutput(data, nodeIdSet) {
       continue
     }
 
-    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'delete', 'rename', 'annotate', 'set_weight'].includes(a.type)
+    const needsId     = ['mark_done', 'mark_active', 'mark_dormant', 'delete', 'rename', 'annotate'].includes(a.type)
     const needsName   = ['add_task', 'add_category', 'add_project', 'rename'].includes(a.type)
     const needsParent = ['add_task', 'add_category'].includes(a.type)
 
@@ -1084,11 +1110,6 @@ function validateOutput(data, nodeIdSet) {
       errors.push(`${prefix}(annotate) 缺少 annotations 字段`)
     }
 
-    if (a.type === 'set_weight') {
-      if (typeof a.weight !== 'number' || a.weight < 0 || a.weight > 2) {
-        errors.push(`${prefix}(set_weight) weight 必须是 0-2 数字`)
-      }
-    }
   }
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors }

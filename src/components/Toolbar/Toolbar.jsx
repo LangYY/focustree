@@ -10,6 +10,7 @@ export default function Toolbar({
   canUndo, canRedo, lastAction, nextAction, onUndo, onRedo,
   history, future,
   onOpenBackup, backupWarning,
+  priorityDebugOpen, onTogglePriorityDebug,
 }) {
   const [showHistory, setShowHistory] = useState(false)
   const [showFuture, setShowFuture] = useState(false)
@@ -130,6 +131,20 @@ export default function Toolbar({
             {backupWarning && (
               <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />
             )}
+          </button>
+        )}
+
+        {onTogglePriorityDebug && (
+          <button
+            onClick={onTogglePriorityDebug}
+            title="查看优先级算法的输入、传播和目标变化"
+            className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
+              priorityDebugOpen
+                ? 'border-cyan-700 bg-cyan-950/50 text-cyan-300'
+                : 'border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500'
+            }`}
+          >
+            审计
           </button>
         )}
 

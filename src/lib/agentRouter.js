@@ -174,8 +174,8 @@ function rankOpenTasks(treeData, userGoal) {
       meta: getDerivedWeightMeta(metaById, node),
     }))
     .sort((a, b) => {
-      const bScore = b.meta?.recommendationRank ?? 0
-      const aScore = a.meta?.recommendationRank ?? 0
+      const bScore = b.meta?.directPriority ?? 0
+      const aScore = a.meta?.directPriority ?? 0
       if (bScore !== aScore) return bScore - aScore
       return (b.node.position ?? 0) - (a.node.position ?? 0)
     })
@@ -201,7 +201,7 @@ function matchesTimeIntent(node, mode, rawText) {
 function formatTaskLines(items) {
   return items.map((item, index) => {
     const meta = item.meta
-    const score = meta ? `，匹配度 ${Math.round(meta.recommendationRank * 100)}%` : ''
+    const score = meta ? `，综合优先级 ${Math.round(meta.directPriority)}分` : ''
     const priority = item.node.current_priority
       ? `，优先级 ${PRIORITY_LABELS[item.node.current_priority] || item.node.current_priority}`
       : ''

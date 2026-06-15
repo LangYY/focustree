@@ -18,6 +18,8 @@
  *     "recommendation_log": [...],
  *     "daily_focus": [...],
  *     "weekly_reviews": [...]
+ *     "goal_history": [...],
+ *     "priority_analysis_runs": [...]
  *   }
  * }
  */
@@ -33,6 +35,8 @@ const TABLES = [
   'recommendation_log',
   'daily_focus',
   'weekly_reviews',
+  'goal_history',
+  'priority_analysis_runs',
 ]
 
 // 删除顺序：先无依赖、后被依赖（nodes 最后；先深后浅）
@@ -41,6 +45,8 @@ const DELETE_ORDER = [
   'recommendation_log',
   'daily_focus',
   'weekly_reviews',
+  'priority_analysis_runs',
+  'goal_history',
   'conversations',
   'user_profile',
   'node_annotations',
@@ -57,6 +63,8 @@ const INSERT_ORDER = [
   'session_summaries',
   'daily_focus',
   'weekly_reviews',
+  'goal_history',
+  'priority_analysis_runs',
 ]
 
 // ── 导出 ──────────────────────────────────────────────

@@ -31,6 +31,8 @@ const REQUIRED_TABLES = [
   'recommendation_log',
   'daily_focus',
   'weekly_reviews',
+  'goal_history',
+  'priority_analysis_runs',
 ]
 
 if (!API_KEY)  console.error(`❌ ${LLM_PROVIDER === 'openai' ? 'OPENAI_API_KEY' : 'DEEPSEEK_API_KEY'} not set`)

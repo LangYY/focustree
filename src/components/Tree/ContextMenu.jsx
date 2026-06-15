@@ -3,11 +3,6 @@ import { useEffect, useRef } from 'react'
 const STATUS_LABELS = { active: '进行中', done: '已完成', dormant: '暂停' }
 const TYPE_LABELS   = { project: '项目', category: '分类', task: '任务' }
 
-function safeRatio(value, fallback = 1) {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : fallback
-}
-
 export default function ContextMenu({ x, y, node, onClose, onAction }) {
   const ref = useRef(null)
 
@@ -35,9 +30,6 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
   const nextStatus = node.status === 'done' ? 'active'
     : node.status === 'active' ? 'done' : 'active'
   const statusActionLabel = node.status === 'done' ? '标记为进行中' : '标记为已完成'
-  const localShare = safeRatio(node.__localShare ?? node.weight ?? 1)
-  const effectiveShare = safeRatio(node.__flow ?? localShare, localShare)
-  const effectivePct = Math.round(effectiveShare * 100)
   const hasChildren = (node.children?.length || 0) > 0
 
   return (
@@ -89,13 +81,6 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
             onClick={() => { onAction('status', { node, status: 'dormant' }); onClose() }}
           />
         )}
-
-        {/* 调整权重 */}
-        <MenuItem
-          icon="W"
-          label={`调整权重 (有效 ${effectivePct}%)`}
-          onClick={() => { onAction('weight', { node }); onClose() }}
-        />
 
         <div className="border-t border-gray-800 my-1" />
 

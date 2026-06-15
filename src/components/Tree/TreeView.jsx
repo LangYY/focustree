@@ -148,14 +148,15 @@ function assignCumulativeFlow(root, userGoal) {
   const metaById = getDerivedWeightMetaMap(root.data, { userGoal })
   root.eachBefore(node => {
     const meta = getDerivedWeightMeta(metaById, node.data)
-    node.__flow = meta?.flow ?? 1
-    node.__localShare = meta?.localShare ?? 1
-    node.__branchPressure = meta?.branchPressure ?? 0.1
-    node.__goalFit = meta?.goalFit ?? 0.5
-    node.__completeness = meta?.completeness ?? 1
-    node.__missingSlots = meta?.missingSlots ?? []
-    node.__recommendationRank = meta?.recommendationRank ?? 0
-    node.__urgency = meta?.urgency ?? 0
+    node.__branchPriority = meta?.branchPriority ?? 0
+    node.__directPriority = meta?.directPriority ?? 0
+    node.__cultivationScore = meta?.cultivationScore ?? 0
+    node.__priorityConfidence = meta?.confidence ?? 0
+    node.__priorityAnalysisConfidence = meta?.analysisConfidence ?? null
+    node.__priorityStaleReasons = meta?.staleReasons ?? []
+    node.__prioritySignals = meta?.signalBreakdown ?? []
+    // Existing SVG width mapping remains in place until the separate UI phase.
+    node.__flow = (meta?.branchPriority ?? 0) / 100
   })
 }
 
@@ -221,13 +222,12 @@ function withDerivedWeightMeta(hNode) {
   return {
     ...hNode.data,
     __flow: hNode.__flow,
-    __localShare: hNode.__localShare,
-    __branchPressure: hNode.__branchPressure,
-    __goalFit: hNode.__goalFit,
-    __completeness: hNode.__completeness,
-    __missingSlots: hNode.__missingSlots,
-    __recommendationRank: hNode.__recommendationRank,
-    __urgency: hNode.__urgency,
+    __branchPriority: hNode.__branchPriority,
+    __directPriority: hNode.__directPriority,
+    __cultivationScore: hNode.__cultivationScore,
+    __priorityConfidence: hNode.__priorityConfidence,
+    __priorityStaleReasons: hNode.__priorityStaleReasons,
+    __prioritySignals: hNode.__prioritySignals,
   }
 }
 
@@ -405,8 +405,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('class', 'link')
       .attr('data-target-id', d => d.target.data.id || '')
       .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
-      .attr('data-local-share', d => Number.isFinite(d.target.__localShare) ? d.target.__localShare.toFixed(4) : '')
-      .attr('data-branch-pressure', d => Number.isFinite(d.target.__branchPressure) ? d.target.__branchPressure.toFixed(2) : '')
+      .attr('data-direct-priority', d => Number.isFinite(d.target.__directPriority) ? d.target.__directPriority.toFixed(1) : '')
+      .attr('data-branch-priority', d => Number.isFinite(d.target.__branchPriority) ? d.target.__branchPriority.toFixed(1) : '')
+      .attr('data-cultivation', d => Number.isFinite(d.target.__cultivationScore) ? d.target.__cultivationScore.toFixed(1) : '')
       .attr('data-completeness', d => Number.isFinite(d.target.__completeness) ? d.target.__completeness.toFixed(2) : '')
       .attr('data-goal-fit', d => Number.isFinite(d.target.__goalFit) ? d.target.__goalFit.toFixed(2) : '')
       .attr('data-recommendation-rank', d => Number.isFinite(d.target.__recommendationRank) ? d.target.__recommendationRank.toFixed(2) : '')

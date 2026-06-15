@@ -1,3 +1,5 @@
+import { computePriorityMetaMap, getPriorityMeta } from './priorityEngine.js'
+
 /**
  * 把 Supabase 返回的 flat nodes 数组转成 D3 需要的树结构
  */
@@ -448,6 +450,9 @@ function childLocalSharesFromMeta(children, metaByNode) {
 }
 
 export function computeTreeNodeMetaMap(tree, options = {}) {
+  if (options.algorithmVersion !== 'legacy') {
+    return computePriorityMetaMap(tree, options)
+  }
   const metaById = new Map()
   if (!tree) return metaById
 
@@ -556,8 +561,7 @@ export function getDerivedWeightMetaMap(tree, options = {}) {
 }
 
 export function getDerivedWeightMeta(metaById, node) {
-  if (!metaById || !node) return null
-  return metaById.get(node.id) ?? metaById.get(String(node.id)) ?? null
+  return getPriorityMeta(metaById, node)
 }
 
 /** 通过 ID 找节点 */
@@ -595,14 +599,14 @@ export function treeToPromptText(tree, userGoal = null) {
     const indent = '  '.repeat(depth)
     const icon   = STATUS[node.status] || '▶'
     const meta = getDerivedWeightMeta(metaById, node)
-    const wPct = Math.round((meta?.localShare ?? node.weight ?? 1) * 100)
-    const flowPct = Math.round((meta?.flow ?? meta?.localShare ?? node.weight ?? 1) * 100)
-    const weightText = flowPct === wPct ? `w:${wPct}%` : `w:${wPct}% flow:${flowPct}%`
+    const directPriority = Math.round(meta?.directPriority ?? 0)
+    const branchPriority = Math.round(meta?.branchPriority ?? directPriority)
+    const cultivation = Math.round(meta?.cultivationScore ?? 0)
     const metaText = meta
-      ? ` pressure:${meta.branchPressure.toFixed(1)} complete:${Math.round(meta.completeness * 100)}% goal:${Math.round(meta.goalFit * 100)}% rank:${Math.round(meta.recommendationRank * 100)}%`
+      ? ` direct:${directPriority} branch:${branchPriority} cultivation:${cultivation} confidence:${Math.round((meta.confidence ?? 0) * 100)}%`
       : ''
-    const missingText = meta?.missingSlots?.length ? ` missing:${meta.missingSlots.join('/')}` : ''
-    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id} ${weightText}${metaText}${missingText})${annoTag(node)}`)
+    const staleText = meta?.staleReasons?.length ? ` stale:${meta.staleReasons.join('/')}` : ''
+    lines.push(`${indent}${icon} [${node.type}] ${node.name} (id:${node.id}${metaText}${staleText})${annoTag(node)}`)
     node.children?.forEach(c => walk(c, depth + 1))
   }
   walk(tree, 0)

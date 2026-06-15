@@ -20,11 +20,9 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
           ...node,
           projectName,
           projectColor,
-          effectiveWeight: meta?.flow ?? node.weight ?? 0,
-          localShare: meta?.localShare ?? node.weight ?? 0,
-          recommendationRank: meta?.recommendationRank ?? 0,
-          completeness: meta?.completeness ?? 1,
-          missingSlots: meta?.missingSlots ?? [],
+          directPriority: meta?.directPriority ?? 0,
+          branchPriority: meta?.branchPriority ?? 0,
+          cultivationScore: meta?.cultivationScore ?? 0,
         })
       }
       const pName  = node.type === 'project' ? node.name  : projectName
@@ -32,7 +30,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
       node.children?.forEach(c => collect(c, pName, pColor))
     }
     if (treeData) collect(treeData, '', '#6b7280')
-    return result.sort((a, b) => (b.recommendationRank || 0) - (a.recommendationRank || 0))
+    return result.sort((a, b) => (b.directPriority || 0) - (a.directPriority || 0))
   }, [treeData, userGoal])
 
   const active  = tasks.filter(t => t.status === 'active')
@@ -126,7 +124,7 @@ function TaskRow({ task, onStatusChange, dimmed }) {
           <div
             className="h-full rounded-full"
             style={{
-              width: `${safePercent(task.recommendationRank || task.effectiveWeight)}%`,
+              width: `${safePercent((task.directPriority || 0) / 100)}%`,
               background: STATUS_COLOR[task.status] || '#6b7280',
             }}
           />

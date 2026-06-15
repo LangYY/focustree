@@ -11,6 +11,7 @@ import {
   normalizeTargetCompletionDate,
   SAMPLE_DATA,
 } from '../lib/treeUtils'
+import { getGoalVersion, nodePriorityFingerprint, PRIORITY_RELATION_TYPES } from '../lib/priorityEngine'
 
 const MAX_HISTORY = 30
 
@@ -240,9 +241,8 @@ export function useTree(user) {
 
   // ── 新增节点（可带 AI 自动生成的 annotations）────────
 
-  const addNode = useCallback(async ({ name, type, parentId, color, annotations, weight, current_priority, target_completion_date }) => {
+  const addNode = useCallback(async ({ name, type, parentId, color, annotations, current_priority, target_completion_date }) => {
     if (!user) return
-    const nodeWeight = typeof weight === 'number' ? Math.max(0, Math.min(2, weight)) : 1.0
     const nodePriority = normalizeCurrentPriority(current_priority)
     const nodeTargetDate = normalizeTargetCompletionDate(target_completion_date)
     const insertPayload = {
@@ -250,7 +250,7 @@ export function useTree(user) {
       parent_id: parentId || null,
       name: name.trim(),
       type, color: color || null,
-      status: 'active', weight: nodeWeight,
+      status: 'active',
       expanded: true, position: Date.now(),
       last_active_at: new Date().toISOString(),
     }
@@ -323,6 +323,54 @@ export function useTree(user) {
     if (error) console.warn('[annotateNode]', error.message)
     setTreeData(prev => prev ? updateNodeAnnotationInTree(prev, nodeId, annotationPayload) : prev)
   }, [user])
+
+  const applyPriorityAnalyses = useCallback(async (proposals, goal) => {
+    if (!user || !Array.isArray(proposals) || proposals.length === 0) return { applied: 0, missing: [] }
+    const goalVersion = getGoalVersion(goal)
+    const rows = []
+    const localUpdates = []
+    const missing = []
+
+    for (const proposal of proposals) {
+      const nodeId = proposal.node_id || proposal.id
+      const node = nodeId ? findNodeById(treeData, nodeId) : null
+      if (!node || node.type === 'root') {
+        missing.push(proposal.name || nodeId || '未命名节点')
+        continue
+      }
+      const relationType = PRIORITY_RELATION_TYPES.includes(proposal.relation_type)
+        ? proposal.relation_type
+        : 'normal'
+      const priorityAnalysis = {
+        goal_alignment: clampUnit(proposal.goal_alignment),
+        necessity: clampUnit(proposal.necessity),
+        delay_cost: clampUnit(proposal.delay_cost),
+        relation_type: relationType,
+        confidence: clampUnit(proposal.confidence ?? 0.5),
+        reason: String(proposal.reason || '').trim() || null,
+        goal_version: goalVersion,
+        node_fingerprint: nodePriorityFingerprint(node),
+        confirmed: true,
+        confirmed_at: new Date().toISOString(),
+        algorithm_version: 'priority-v2',
+      }
+      rows.push({ node_id: node.id, user_id: user.id, priority_analysis: priorityAnalysis })
+      localUpdates.push({ nodeId: node.id, priorityAnalysis })
+    }
+
+    if (rows.length) {
+      const { error } = await supabase.from('node_annotations').upsert(rows, { onConflict: 'node_id' })
+      if (error) throw error
+      setTreeData(prev => {
+        let next = prev
+        for (const item of localUpdates) {
+          next = updateNodeAnnotationInTree(next, item.nodeId, { priority_analysis: item.priorityAnalysis })
+        }
+        return next
+      })
+    }
+    return { applied: rows.length, missing }
+  }, [treeData, user])
 
   // ── 删除节点（级联删除子节点）────────────────────────
 
@@ -656,38 +704,6 @@ export function useTree(user) {
     setTreeData(null)
   }, [user, treeData, pushHistory])
 
-  // ── 权重更新 ──────────────────────────────────────────
-
-  const updateWeight = useCallback(async (nodeId, weight) => {
-    if (!user) return
-    const node = findNodeById(treeData, nodeId)
-    const prevWeight = node?.weight ?? 1.0
-    const nextWeight = Number.isFinite(Number(weight)) ? Math.max(0, Math.min(2, Number(weight))) : prevWeight
-
-    setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, nextWeight) : prev)
-
-    const { error } = await supabase
-      .from('nodes')
-      .update({ weight: nextWeight })
-      .eq('id', nodeId)
-      .eq('user_id', user.id)
-
-    if (error) {
-      console.error('[updateWeight]', error.message)
-      alert(`调整权重失败：${error.message}`)
-      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, prevWeight) : prev)
-      return
-    }
-
-    pushHistory(`调整「${node?.name}」权重`, async () => {
-      await supabase.from('nodes').update({ weight: prevWeight }).eq('id', nodeId).eq('user_id', user.id)
-      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, prevWeight) : prev)
-    }, async () => {
-      await supabase.from('nodes').update({ weight: nextWeight }).eq('id', nodeId).eq('user_id', user.id)
-      setTreeData(prev => prev ? updateNodeWeightInTree(prev, nodeId, nextWeight) : prev)
-    })
-  }, [user, treeData, pushHistory])
-
   const updateNodePlanning = useCallback(async (nodeId, fields) => {
     if (!user || !nodeId || !fields) return
     const node = findNodeById(treeData, nodeId)
@@ -745,8 +761,8 @@ export function useTree(user) {
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, updateWeight, moveNode, reorderNode,
-    annotateNode, updateNodeDetails, updateNodePlanning,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, moveNode, reorderNode,
+    annotateNode, updateNodeDetails, updateNodePlanning, applyPriorityAnalyses,
     reload: loadNodes,
     // 历史
     history,
@@ -760,6 +776,12 @@ export function useTree(user) {
   }
 }
 
+function clampUnit(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.min(1, numeric))
+}
+
 // ── 本地树操作 ────────────────────────────────────────
 
 function setAllExpanded(node, value) {
@@ -768,12 +790,6 @@ function setAllExpanded(node, value) {
 function toggleExpanded(node, id) {
   if (node.id === id) return { ...node, expanded: !node.expanded }
   return { ...node, children: node.children?.map(c => toggleExpanded(c, id)) }
-}
-
-function updateNodeWeightInTree(node, nodeId, weight) {
-  if (node.id === nodeId) return { ...node, weight }
-  if (!node.children?.length) return node
-  return { ...node, children: node.children.map(c => updateNodeWeightInTree(c, nodeId, weight)) }
 }
 
 function updateNodeFieldsInTree(node, nodeId, fields) {

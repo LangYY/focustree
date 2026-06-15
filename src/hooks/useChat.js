@@ -374,9 +374,9 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
 
     const draftActions = sourceMsg.applied_draft_actions ? [] : thinking.draft_actions
     const draftResult = await executeDraftActionsSafely(draftActions, treeActions, treeData)
-    const weightResult = sourceMsg.applied_weight_plan
+    const priorityResult = sourceMsg.applied_priority_analysis
       ? { status: 'none' }
-      : await applyWeightProposalsSafely(thinking, treeActions, treeData, draftResult.newIdByName)
+      : await applyPriorityProposalSafely(thinking, treeActions, treeData, userGoal)
 
     const replyParts = []
     if (draftResult.attempted) {
@@ -387,14 +387,10 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       }
     }
 
-    if (weightResult.status === 'applied') {
-      replyParts.push('已应用这套权重方案。')
-    } else if (weightResult.status === 'blocked') {
-      replyParts.push('权重方案仍需先确认排序原则，我没有自动写入。')
-    } else if (weightResult.status === 'missing') {
-      replyParts.push(`权重方案里有分支还没法对应到面板节点：${weightResult.names.join('、')}。`)
-    } else if (weightResult.status === 'invalid') {
-      replyParts.push(`权重方案里有分支缺少有效百分比：${weightResult.names.join('、')}。`)
+    if (priorityResult.status === 'applied') {
+      replyParts.push(`已确认目标与优先级分析，更新 ${priorityResult.appliedCount} 个节点。`)
+    } else if (priorityResult.status === 'missing') {
+      replyParts.push(`有些分析无法对应到现有节点：${priorityResult.names.join('、')}。`)
     }
 
     if (!replyParts.length) return false
@@ -405,7 +401,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       ...prev.map(m => m.id === sourceMsg.id ? {
         ...m,
         applied_draft_actions: draftResult.attempted ? true : m.applied_draft_actions,
-        applied_weight_plan: weightResult.status === 'applied' ? true : m.applied_weight_plan,
+        applied_priority_analysis: priorityResult.status === 'applied' ? true : m.applied_priority_analysis,
       } : m),
       assistantMsg,
     ])
@@ -414,9 +410,22 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         user_id: user.id, role: 'assistant', content,
         session_id: activeSession,
       })
+      if (priorityResult.status !== 'none') {
+        const { error } = await supabase.from('priority_analysis_runs').insert({
+          user_id: user.id,
+          goal_version: priorityResult.goal?.version || null,
+          goal_snapshot: priorityResult.goal || userGoal || null,
+          proposals: thinking.node_priority_proposals || [],
+          confirmed_payload: thinking.node_priority_proposals || [],
+          status: priorityResult.status === 'applied' ? 'confirmed' : 'rejected',
+          model_used: sourceMsg.model_used || null,
+          confirmed_at: priorityResult.status === 'applied' ? new Date().toISOString() : null,
+        })
+        if (error) console.warn('[priority analysis audit]', error.message)
+      }
     }
     return true
-  }, [treeActions, user])
+  }, [treeActions, user, userGoal])
 
   const applyDraftPlan = useCallback(async (messageId, treeData) => {
     if (!messageId || !treeActions) return
@@ -558,7 +567,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         const actionLogs = []
         const newIdByName = {}
         if (intent.actions?.length && treeActions) {
-          const executableActions = withGeneratedChildWeights(intent.actions.map(normalizeDraftAction))
+          const executableActions = intent.actions.map(normalizeDraftAction)
           for (const action of executableActions) {
             if (action.parent && newIdByName[action.parent]) {
               action.parent = newIdByName[action.parent]
@@ -676,7 +685,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       }
 
       if (actions?.length) {
-        const executableActions = withGeneratedChildWeights(actions.map(normalizeDraftAction))
+        const executableActions = actions.map(normalizeDraftAction)
         for (const action of executableActions) {
           if (action.parent && newIdByName[action.parent]) {
             action.parent = newIdByName[action.parent]
@@ -777,97 +786,42 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     }
   }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading, applyConfirmablePlan])
 
-  /**
-   * 应用 AI 在草案卡片里提出的整套权重方案。
-   * 权重语义是同级精力配比：应用前按父级分组归一化到 100%。
-   */
-  const applyWeightPlan = useCallback(async (messageId, treeData) => {
-    if (!treeActions?.updateWeight || !messageId) return
+  /** Apply a reviewed goal/priority analysis from an assistant message. */
+  const applyPriorityAnalysis = useCallback(async (messageId, overrides, treeData) => {
+    if (!treeActions || !messageId) return
     const msg = messages.find(m => m.id === messageId)
-    const thinking = msg?.thinking
-    const proposals = Array.isArray(thinking?.branch_weight_proposals)
-      ? thinking.branch_weight_proposals
-      : []
-    if (!msg || msg.applied_weight_plan || proposals.length === 0) return
-
-    const conflicts = Array.isArray(thinking.conflicts) ? thinking.conflicts.filter(Boolean) : []
-    if (conflicts.length || thinking.weight_strategy?.requires_clarification) {
-      const content = '这套权重方案还有未确认的冲突，先确认排序原则后再应用。'
-      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
-      return
+    if (!msg || msg.applied_priority_analysis) return
+    const thinking = {
+      ...msg.thinking,
+      goal_analysis: overrides?.goal_analysis ?? msg.thinking?.goal_analysis,
+      node_priority_proposals: overrides?.node_priority_proposals ?? msg.thinking?.node_priority_proposals,
     }
-
-    const allNodes = treeData ? flattenTree(treeData).filter(n => n.type !== 'root') : []
-    const byName = new Map()
-    for (const node of allNodes) {
-      if (node.name && !byName.has(node.name)) byName.set(node.name, node)
-    }
-
-    let newIdByName = {}
-    const resolveProposals = () => proposals.map(proposal => {
-      const name = proposal.name || proposal.branch_name
-      const explicitId = proposal.node_id || proposal.id || proposal.nodeId
-      const node =
-        (explicitId && findNodeById(treeData, explicitId)) ||
-        (name && newIdByName[name] ? { id: newIdByName[name], name } : null) ||
-        (name ? byName.get(name) : null)
-      const share = readSuggestedShare(proposal)
-      const group = proposal.parent_id || proposal.parent_name || thinking.weight_strategy?.normalization_parent || 'root'
-      return { proposal, node, name, share, group }
-    })
-
-    let resolved = resolveProposals()
-    let missingTargets = resolved.filter(item => !item.node?.id)
-    let invalidShares = resolved.filter(item => typeof item.share !== 'number')
-
-    if (missingTargets.length && Array.isArray(thinking.draft_actions) && thinking.draft_actions.length) {
-      const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
-      newIdByName = draftResult.newIdByName
-      resolved = resolveProposals()
-      missingTargets = resolved.filter(item => !item.node?.id)
-      invalidShares = resolved.filter(item => typeof item.share !== 'number')
-    }
-
-    if (missingTargets.length) {
-      const names = missingTargets.map(item => item.name || '未命名分支').join('、')
-      const content = `这套权重方案里有分支还没法对应到面板节点：${names}。请先应用结构草案或让我重新生成。`
-      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
-      return
-    }
-    if (invalidShares.length) {
-      const names = invalidShares.map(item => item.name || '未命名分支').join('、')
-      const content = `这套权重方案里有分支缺少有效百分比：${names}。请让我重新生成一版权重草案。`
-      setMessages(prev => [...prev, { id: uuid(), role: 'assistant', content, kind: 'local' }])
-      return
-    }
-
-    const groups = new Map()
-    for (const item of resolved) {
-      if (!groups.has(item.group)) groups.set(item.group, [])
-      groups.get(item.group).push(item)
-    }
-
-    for (const items of groups.values()) {
-      const total = items.reduce((sum, item) => sum + item.share, 0)
-      if (total <= 0) continue
-      for (const item of items) {
-        const normalizedWeight = item.share / total
-        await treeActions.updateWeight(item.node.id, normalizedWeight)
-      }
-    }
-
-    const content = '已应用这套权重方案。'
+    const result = await applyPriorityProposalSafely(thinking, treeActions, treeData, userGoal)
+    if (result.status === 'none') return
+    const content = result.status === 'applied'
+      ? `已确认目标与优先级分析，更新 ${result.appliedCount} 个节点。`
+      : `有些分析无法对应到现有节点：${result.names.join('、')}。`
     setMessages(prev => [
-      ...prev.map(m => m.id === messageId ? { ...m, applied_weight_plan: true } : m),
+      ...prev.map(m => m.id === messageId ? { ...m, applied_priority_analysis: result.status === 'applied' } : m),
       { id: uuid(), role: 'assistant', content, kind: 'local' },
     ])
     if (user && sessionId) {
-      supabase.from('conversations').insert({
+      await supabase.from('conversations').insert({
         user_id: user.id, role: 'assistant', content,
         session_id: sessionId,
       })
+      await supabase.from('priority_analysis_runs').insert({
+        user_id: user.id,
+        goal_version: result.goal?.version || null,
+        goal_snapshot: result.goal || userGoal || null,
+        proposals: msg.thinking?.node_priority_proposals || [],
+        confirmed_payload: thinking.node_priority_proposals || [],
+        status: result.status === 'applied' ? 'confirmed' : 'rejected',
+        model_used: msg.model_used || null,
+        confirmed_at: result.status === 'applied' ? new Date().toISOString() : null,
+      })
     }
-  }, [messages, treeActions, user, sessionId])
+  }, [messages, treeActions, user, sessionId, userGoal])
 
   /**
    * 用户主动新开对话。
@@ -976,7 +930,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     recommendations, hitRate, reloadRecommendations: loadRecommendations,
     // 周末回顾
     injectReviewMessage,
-    applyWeightPlan,
+    applyPriorityAnalysis,
     applyDraftPlan,
   }
 }
@@ -1025,7 +979,6 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'task', parentId: action.parent,
           annotations: action.annotations,
-          weight: readActionWeight(action) ?? 1,
         })
         return { log: `已添加任务「${action.name}」`, newId }
       }
@@ -1033,7 +986,6 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'category', parentId: action.parent,
           annotations: action.annotations,
-          weight: readActionWeight(action) ?? 1,
         })
         return { log: `已添加分类「${action.name}」`, newId }
       }
@@ -1041,7 +993,6 @@ async function executeAction(action, treeActions) {
         const newId = await treeActions.addNode({
           name: action.name, type: 'project', color: action.color || '#4A8C5C',
           annotations: action.annotations,
-          weight: action.weight,
         })
         return { log: `已创建项目「${action.name}」`, newId }
       }
@@ -1054,9 +1005,6 @@ async function executeAction(action, treeActions) {
       case 'clear_all':
         await treeActions.clearAll()
         return { log: '已清空所有项目（可点撤销恢复）' }
-      case 'set_weight':
-        await treeActions.updateWeight(id, action.weight)
-        return { log: `已将「${action.name || id}」权重调整为 ${Math.round(action.weight * 100)}%` }
       case 'annotate':
         await treeActions.annotateNode(id, action.annotations)
         return { log: `已为「${action.name || id}」更新策略标签` }
@@ -1070,97 +1018,12 @@ async function executeAction(action, treeActions) {
   }
 }
 
-function readSuggestedShare(proposal) {
-  const raw =
-    proposal?.suggested_share ??
-    proposal?.suggested_weight ??
-    proposal?.weight ??
-    proposal?.share
-  const value = typeof raw === 'string' ? Number(raw.replace('%', '').trim()) : raw
-  if (!Number.isFinite(value) || value < 0) return null
-  return value > 2 ? value / 100 : value
-}
-
 function normalizeDraftAction(action) {
   return {
     ...action,
     id: action.id || action.node_id || action.nodeId || action.task_id || action.taskId,
     parent: action.parent || action.parent_id || action.parentId,
   }
-}
-
-function readActionWeight(action) {
-  const value = typeof action?.weight === 'string'
-    ? Number(action.weight.replace('%', '').trim())
-    : action?.weight
-  if (!Number.isFinite(value) || value < 0) return null
-  return value > 2 ? value / 100 : Math.min(2, value)
-}
-
-function generatedChildWeightScore(action) {
-  const annotations = action?.annotations || {}
-  const text = [
-    action?.name,
-    annotations.strategic_tag,
-    annotations.time_horizon,
-    annotations.energy_cost,
-    annotations.risk,
-    annotations.ai_notes,
-    annotations.roi_type && typeof annotations.roi_type === 'object'
-      ? Object.keys(annotations.roi_type).join(' ')
-      : '',
-  ].filter(Boolean).join(' ')
-
-  let score = action?.type === 'add_task' ? 1 : 0.8
-  if (annotations.time_horizon === '立即') score += 0.75
-  if (annotations.time_horizon === '短期') score += 0.4
-  if (annotations.strategic_tag === '现金流') score += 0.35
-  if (annotations.risk === '确定性') score += 0.12
-  if (/今天|明天|本周|截止|答辩|交付|提交|清零|紧急/i.test(text)) score += 0.35
-  if (/写|剪|做|发|联系|整理|提交|更新|制作|修复|完成/.test(text)) score += 0.15
-  if (/想法|构思|灵感|待定|以后|暂缓/.test(text)) score -= 0.25
-  return Math.max(0.1, score)
-}
-
-function withGeneratedChildWeights(actions) {
-  if (!Array.isArray(actions) || !actions.length) return []
-  const prepared = actions.map(action => ({ ...action }))
-  const groups = new Map()
-
-  prepared.forEach(action => {
-    if (!['add_task', 'add_category'].includes(action.type)) return
-    if (!action.parent) return
-    const groupKey = String(action.parent)
-    if (!groups.has(groupKey)) groups.set(groupKey, [])
-    groups.get(groupKey).push(action)
-  })
-
-  groups.forEach(groupActions => {
-    const explicit = groupActions
-      .map(readActionWeight)
-      .filter(weight => typeof weight === 'number')
-    const explicitTotal = explicit.reduce((sum, weight) => sum + weight, 0)
-    const missing = groupActions.filter(action => readActionWeight(action) == null)
-    const remaining = Math.max(0, 1 - explicitTotal)
-    const missingScores = missing.map(generatedChildWeightScore)
-    const missingScoreTotal = missingScores.reduce((sum, score) => sum + score, 0)
-    const equalFallback = 1 / groupActions.length
-
-    groupActions.forEach(action => {
-      const existingWeight = readActionWeight(action)
-      if (existingWeight != null) {
-        action.weight = existingWeight
-        return
-      }
-      const missingIndex = missing.indexOf(action)
-      const score = missingScores[missingIndex] ?? 0
-      action.weight = remaining <= 0
-        ? 0
-        : (missingScoreTotal > 0 ? remaining * (score / missingScoreTotal) : equalFallback)
-    })
-  })
-
-  return prepared
 }
 
 function isConfirmationText(text) {
@@ -1174,10 +1037,11 @@ function findLatestConfirmableMessage(messages) {
     const hasDraft = Array.isArray(msg.thinking.draft_actions) &&
       msg.thinking.draft_actions.length > 0 &&
       !msg.applied_draft_actions
-    const hasWeights = Array.isArray(msg.thinking.branch_weight_proposals) &&
-      msg.thinking.branch_weight_proposals.length > 0 &&
-      !msg.applied_weight_plan
-    if (hasDraft || hasWeights) return msg
+    const hasPriorityAnalysis = (
+      msg.thinking.goal_analysis ||
+      (Array.isArray(msg.thinking.node_priority_proposals) && msg.thinking.node_priority_proposals.length > 0)
+    ) && !msg.applied_priority_analysis
+    if (hasDraft || hasPriorityAnalysis) return msg
   }
   return null
 }
@@ -1185,7 +1049,7 @@ function findLatestConfirmableMessage(messages) {
 async function executeDraftActionsSafely(actions, treeActions, treeData) {
   const allowedDraftTypes = new Set(['add_project', 'add_category', 'add_task', 'annotate'])
   const draftActions = Array.isArray(actions)
-    ? withGeneratedChildWeights(actions.filter(action => allowedDraftTypes.has(action?.type)).map(normalizeDraftAction))
+    ? actions.filter(action => allowedDraftTypes.has(action?.type)).map(normalizeDraftAction)
     : []
   const result = {
     attempted: draftActions.length > 0,
@@ -1215,53 +1079,34 @@ async function executeDraftActionsSafely(actions, treeActions, treeData) {
   return result
 }
 
-async function applyWeightProposalsSafely(thinking, treeActions, treeData, newIdByName = {}) {
-  const proposals = Array.isArray(thinking?.branch_weight_proposals)
-    ? thinking.branch_weight_proposals
+async function applyPriorityProposalSafely(thinking, treeActions, treeData, currentGoal) {
+  const goalAnalysis = thinking?.goal_analysis || null
+  const proposals = Array.isArray(thinking?.node_priority_proposals)
+    ? thinking.node_priority_proposals
     : []
-  if (!proposals.length || !treeActions?.updateWeight) return { status: 'none' }
-
-  const conflicts = Array.isArray(thinking.conflicts) ? thinking.conflicts.filter(Boolean) : []
-  if (conflicts.length || thinking.weight_strategy?.requires_clarification) {
-    return { status: 'blocked' }
-  }
+  if (!goalAnalysis && !proposals.length) return { status: 'none' }
 
   const index = createTreeIndex(treeData)
-  const resolved = proposals.map(proposal => {
-    const name = proposal.name || proposal.branch_name
-    const explicitId = proposal.node_id || proposal.id || proposal.nodeId
-    const node =
-      (explicitId && findNodeById(treeData, explicitId)) ||
-      (name && newIdByName[name] ? { id: newIdByName[name], name } : null) ||
-      (name ? index.byName.get(name) : null)
-    const share = readSuggestedShare(proposal)
-    const group = proposal.parent_id || proposal.parent_name || thinking.weight_strategy?.normalization_parent || 'root'
-    return { node, name, share, group }
-  })
-
-  const missingTargets = resolved.filter(item => !item.node?.id)
-  if (missingTargets.length) {
-    return { status: 'missing', names: missingTargets.map(item => item.name || '未命名分支') }
-  }
-  const invalidShares = resolved.filter(item => typeof item.share !== 'number')
-  if (invalidShares.length) {
-    return { status: 'invalid', names: invalidShares.map(item => item.name || '未命名分支') }
+  const missing = proposals.filter(proposal => !index.byId.has(proposal.node_id))
+  if (missing.length) {
+    return { status: 'missing', names: missing.map(item => item.name || item.node_id || '未命名节点') }
   }
 
-  const groups = new Map()
-  for (const item of resolved) {
-    if (!groups.has(item.group)) groups.set(item.group, [])
-    groups.get(item.group).push(item)
+  let goal = currentGoal
+  if (goalAnalysis && treeActions?.setGoal) {
+    const version = globalThis.crypto?.randomUUID?.() || `goal-${Date.now()}`
+    goal = await treeActions.setGoal(goalAnalysis.text || goalAnalysis.outcome, {
+      ...goalAnalysis,
+      version,
+      source: 'ai_confirmed',
+    })
   }
+  const result = proposals.length && treeActions?.applyPriorityAnalyses
+    ? await treeActions.applyPriorityAnalyses(proposals, goal)
+    : { applied: 0, missing: [] }
 
-  for (const items of groups.values()) {
-    const total = items.reduce((sum, item) => sum + item.share, 0)
-    if (total <= 0) continue
-    for (const item of items) {
-      await treeActions.updateWeight(item.node.id, item.share / total)
-    }
-  }
-  return { status: 'applied' }
+  if (result.missing?.length) return { status: 'missing', names: result.missing }
+  return { status: 'applied', appliedCount: result.applied || 0, goal }
 }
 
 function createTreeIndex(treeData) {

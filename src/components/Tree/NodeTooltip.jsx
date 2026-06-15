@@ -3,23 +3,14 @@ import { PRIORITY_LABELS, getNodeDueState } from '../../lib/treeUtils'
 const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
 
-function safeRatio(value, fallback = 1) {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : fallback
-}
-
 export default function NodeTooltip({ x, y, node }) {
   if (!node) return null
 
-  const localShare = safeRatio(node.__localShare ?? node.weight ?? 1)
-  const effectiveShare = safeRatio(node.__flow ?? localShare, localShare)
-  const localPct = Math.round(localShare * 100)
-  const effectivePct = Math.round(effectiveShare * 100)
-  const showLocalShare = Math.abs(effectiveShare - localShare) > 0.005
-  const completenessPct = Math.round(safeRatio(node.__completeness ?? 1) * 100)
-  const rankPct = Math.round(safeRatio(node.__recommendationRank ?? 0, 0) * 100)
-  const pressure = Number(node.__branchPressure)
-  const missingSlots = Array.isArray(node.__missingSlots) ? node.__missingSlots : []
+  const directPriority = Math.round(Number(node.__directPriority) || 0)
+  const branchPriority = Math.round(Number(node.__branchPriority) || 0)
+  const cultivation = Math.round(Number(node.__cultivationScore) || 0)
+  const confidence = Math.round((Number(node.__priorityConfidence) || 0) * 100)
+  const staleReasons = Array.isArray(node.__priorityStaleReasons) ? node.__priorityStaleReasons : []
   const priorityLabel = PRIORITY_LABELS[node.current_priority] || ''
   const dueState = getNodeDueState(node)
 
@@ -51,17 +42,12 @@ export default function NodeTooltip({ x, y, node }) {
         <span className="text-gray-400">{STATUS_LABEL[node.status] || node.status}</span>
       </div>
 
-      {(node.weight != null || node.__localShare != null || node.__flow != null) && (
-        <div className="text-gray-500">
-          有效权重 {effectivePct}%
-          {showLocalShare && (
-            <span className="text-gray-600"> · 本级 {localPct}%</span>
-          )}
-        </div>
-      )}
+      <div className="text-gray-500 mt-0.5">
+        直接优先级 {directPriority} · 枝干 {branchPriority}
+      </div>
 
       <div className="text-gray-500 mt-0.5">
-        完整度 {completenessPct}% · 推荐分 {rankPct}%
+        培育程度 {cultivation} · 置信 {confidence}%
       </div>
 
       {(priorityLabel || node.target_completion_date) && (
@@ -76,15 +62,9 @@ export default function NodeTooltip({ x, y, node }) {
         </div>
       )}
 
-      {Number.isFinite(pressure) && (
-        <div className="text-gray-600 mt-0.5">
-          分支压力 {pressure.toFixed(1)}
-        </div>
-      )}
-
-      {missingSlots.length > 0 && (
+      {staleReasons.length > 0 && (
         <div className="text-amber-400/80 mt-1">
-          缺：{missingSlots.slice(0, 3).join('、')}
+          待复核：{staleReasons.slice(0, 3).join('、')}
         </div>
       )}
 
