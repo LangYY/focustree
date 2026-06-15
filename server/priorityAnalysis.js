@@ -23,8 +23,11 @@ export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, sign
   const costs = []
   const models = []
 
-  for (const batch of batches) {
-    const result = await analyzeBatch({ batch, goal, provider, apiKey, signal })
+  const results = await Promise.all(batches.map(batch => (
+    analyzeBatch({ batch, goal, provider, apiKey, signal })
+  )))
+
+  for (const result of results) {
     proposals.push(...result.proposals)
     if (result.usage) usages.push(result.usage)
     if (result.usageCost) costs.push(result.usageCost)
@@ -43,11 +46,11 @@ export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, sign
 
 async function analyzeBatch({ batch, goal, provider, apiKey, signal }) {
   const primaryModel = provider === 'openai'
-    ? (ENV.OPENAI_MODEL_REASONER || ENV.OPENAI_MODEL || 'gpt-5.4-mini')
-    : 'deepseek-v4-pro'
-  const fallbackModel = provider === 'openai'
     ? (ENV.OPENAI_MODEL_CHAT || ENV.OPENAI_MODEL || 'gpt-5.4-mini')
     : 'deepseek-v4-flash'
+  const fallbackModel = provider === 'openai'
+    ? (ENV.OPENAI_MODEL_REASONER || ENV.OPENAI_MODEL || 'gpt-5.4-mini')
+    : 'deepseek-v4-pro'
   const models = primaryModel === fallbackModel ? [primaryModel] : [primaryModel, fallbackModel]
   let lastError = null
 
