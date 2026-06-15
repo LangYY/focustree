@@ -5,6 +5,7 @@ import {
   estimatePriorityAnalysisTokens,
   formatTokenEstimate,
 } from '../src/lib/priorityAnalysis.js'
+import { resolvePriorityAnalysisModels } from '../server/priorityAnalysis.js'
 
 const tree = {
   id: 'root',
@@ -44,4 +45,16 @@ test('token estimate scales with node count and has a readable label', () => {
   const large = estimatePriorityAnalysisTokens(Array(20).fill(nodes[0]), { text: '完成客户回款' })
   assert.ok(large > small)
   assert.match(formatTokenEstimate(large), /tokens/)
+})
+
+test('quick priority analysis never falls back to the pro model', () => {
+  assert.deepEqual(resolvePriorityAnalysisModels('deepseek', 'chat'), ['deepseek-v4-flash'])
+})
+
+test('automatic and deep priority analysis keep distinct model policies', () => {
+  assert.deepEqual(
+    resolvePriorityAnalysisModels('deepseek', 'auto'),
+    ['deepseek-v4-flash', 'deepseek-v4-pro'],
+  )
+  assert.deepEqual(resolvePriorityAnalysisModels('deepseek', 'reasoner'), ['deepseek-v4-pro'])
 })

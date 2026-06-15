@@ -11,7 +11,7 @@ export function estimatePriorityAnalysisTokens(nodes, goal) {
   return Math.max(900, inputTokens + outputTokens)
 }
 
-export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, signal }) {
+export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, signal, modelMode = 'auto' }) {
   const normalizedNodes = normalizeNodes(nodes)
   if (!goal?.text?.trim()) throw new Error('请先设置当前目标，再进行 AI 优先级分析。')
   if (!normalizedNodes.length) throw new Error('没有需要分析的节点。')
@@ -24,7 +24,7 @@ export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, sign
   const models = []
 
   const results = await Promise.all(batches.map(batch => (
-    analyzeBatch({ batch, goal, provider, apiKey, signal })
+    analyzeBatch({ batch, goal, provider, apiKey, signal, modelMode })
   )))
 
   for (const result of results) {
@@ -44,18 +44,26 @@ export async function analyzePriorityNodes({ nodes, goal, provider, apiKey, sign
   }
 }
 
-async function analyzeBatch({ batch, goal, provider, apiKey, signal }) {
+export function resolvePriorityAnalysisModels(provider, modelMode = 'auto') {
   const primaryModel = provider === 'openai'
     ? (ENV.OPENAI_MODEL_CHAT || ENV.OPENAI_MODEL || 'gpt-5.4-mini')
     : 'deepseek-v4-flash'
   const fallbackModel = provider === 'openai'
     ? (ENV.OPENAI_MODEL_REASONER || ENV.OPENAI_MODEL || 'gpt-5.4-mini')
     : 'deepseek-v4-pro'
-  const models = primaryModel === fallbackModel ? [primaryModel] : [primaryModel, fallbackModel]
+
+  if (modelMode === 'chat') return [primaryModel]
+  if (modelMode === 'reasoner') return [fallbackModel]
+  return primaryModel === fallbackModel ? [primaryModel] : [primaryModel, fallbackModel]
+}
+
+async function analyzeBatch({ batch, goal, provider, apiKey, signal, modelMode }) {
+  const models = resolvePriorityAnalysisModels(provider, modelMode)
   let lastError = null
 
   for (const model of models) {
     try {
+      console.log(`[priority-analysis] preference=${modelMode}, model=${model}, nodes=${batch.length}`)
       const body = {
         model,
         messages: [

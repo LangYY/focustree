@@ -867,7 +867,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       const response = await fetch('/api/priority-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, goal: userGoal, mode }),
+        body: JSON.stringify({ nodes, goal: userGoal, mode, model }),
         signal: controller.signal,
       })
       const result = await response.json()
@@ -917,7 +917,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       if (abortRef.current === controller) abortRef.current = null
       setIsLoading(false)
     }
-  }, [isLoading, sessionId, user, userGoal])
+  }, [isLoading, sessionId, user, userGoal, model])
 
   /**
    * 用户主动新开对话。

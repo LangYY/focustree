@@ -101,7 +101,7 @@ app.get('/runtime-config.js', (req, res) => {
 // ── /api/priority-analysis ────────────────────────────
 
 app.post('/api/priority-analysis', async (req, res) => {
-  const { nodes, goal, mode = 'missing' } = req.body || {}
+  const { nodes, goal, mode = 'missing', model = 'auto' } = req.body || {}
   if (!API_KEY) return res.status(500).json({ error: 'API key not configured' })
   if (!goal?.text) return res.status(400).json({ error: '请先设置当前目标。' })
   if (!Array.isArray(nodes) || nodes.length === 0) return res.status(400).json({ error: '没有需要分析的节点。' })
@@ -114,13 +114,14 @@ app.post('/api/priority-analysis', async (req, res) => {
   res.on('close', abort)
 
   try {
-    console.log(`[/api/priority-analysis] mode=${mode}, nodes=${nodes.length}, estimate=${estimatePriorityAnalysisTokens(nodes, goal)}`)
+    console.log(`[/api/priority-analysis] mode=${mode}, model=${model}, nodes=${nodes.length}, estimate=${estimatePriorityAnalysisTokens(nodes, goal)}`)
     const result = await analyzePriorityNodes({
       nodes,
       goal,
       provider: LLM_PROVIDER,
       apiKey: API_KEY,
       signal: controller.signal,
+      modelMode: model,
     })
     if (!controller.signal.aborted) {
       res.json({
