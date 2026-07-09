@@ -34,6 +34,7 @@ function defaultNodeName(type) {
 export default function App() {
   const [user, setUser]           = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [authSlow, setAuthSlow] = useState(false)   // 连接过慢提示
   const [chatOpen, setChatOpen]   = useState(true)
   const [modal, setModal]         = useState(null)  // { parentNode, defaultType }
   const [model, setModel]         = useState(() => localStorage.getItem('ft_model') || 'auto')
@@ -68,10 +69,23 @@ export default function App() {
       if (markReady) setAuthLoading(false)
     }
 
+    // 防呆：Supabase 连不上（项目暂停/网络阻断）时不要永久 loading
+    const slowTimer = window.setTimeout(() => { if (isMounted) setAuthSlow(true) }, 5000)
+    const hardTimer = window.setTimeout(() => {
+      if (isMounted) {
+        console.warn('[auth] getSession 超时（12s），可能 Supabase 项目暂停或网络不通')
+        setAuthLoading(false)
+      }
+    }, 12000)
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(hardTimer)
       syncSession(session, { markReady: true })
     }).catch((error) => {
       console.error('[auth] getSession failed:', error)
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(hardTimer)
       if (isMounted) setAuthLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -81,6 +95,8 @@ export default function App() {
     })
     return () => {
       isMounted = false
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(hardTimer)
       subscription.unsubscribe()
     }
   }, [])
@@ -291,8 +307,21 @@ export default function App() {
   // ── 渲染 ────────────────────────────────────────────
   if (authLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', color: '#6b7280' }}>
-        载入中…
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', color: '#6b7280' }}>
+        <div>载入中…</div>
+        {authSlow && (
+          <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', lineHeight: 1.7, maxWidth: 360 }}>
+            连接数据库较慢。可能原因：<br />
+            · Supabase 免费项目闲置后被暂停（去 Dashboard 点 Restore）<br />
+            · 网络代理拦截了 supabase.co<br />
+            <button
+              onClick={() => window.location.reload()}
+              style={{ marginTop: 8, padding: '4px 14px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#93c5fd', cursor: 'pointer' }}
+            >
+              重试
+            </button>
+          </div>
+        )}
       </div>
     )
   }
