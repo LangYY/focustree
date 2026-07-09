@@ -241,6 +241,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const gRef    = useRef(null)
   const zoomRef = useRef(null)
   const rootRef = useRef(null)   // 缓存 d3 hierarchy root，供高亮 effect 使用
+  const prevPosRef = useRef(new Map())  // 上一帧各节点位置，用于树枝展开/收回动画
   const treeDataRef = useRef(treeData)
   const autoCenteredRef = useRef(false)
   const defaultTransformRef = useRef(d3.zoomIdentity)
@@ -396,13 +397,62 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     )
 
     const g = d3.select(gRef.current)
-    g.selectAll('*').remove()
 
-    // 链接线
-    g.selectAll('.link')
-      .data(links)
-      .join('path')
+    // ── 持久图层：links 底层 / hits 中层 / nodes 顶层（只建一次，不再全量重画）──
+    if (g.select('.layer-links').empty()) {
+      g.append('g').attr('class', 'layer-links')
+      g.append('g').attr('class', 'layer-hits')
+      g.append('g').attr('class', 'layer-nodes')
+    }
+    const linkLayer = g.select('.layer-links')
+    const hitLayer  = g.select('.layer-hits')
+    const nodeLayer = g.select('.layer-nodes')
+
+    // ── 树枝展开动画的位置账本 ──
+    const prevPos = prevPosRef.current
+    const firstRender = prevPos.size === 0
+    const newPos = new Map(nodes.map(n => [n.data.id, { x: n.x, y: n.y }]))
+
+    // 新枝从哪里长出来：最近的「上一帧就存在」的祖先位置；首帧从父节点位置展开
+    const growOrigin = (d) => {
+      if (!firstRender) {
+        let a = d.parent
+        while (a && !prevPos.has(a.data.id)) a = a.parent
+        if (a) return prevPos.get(a.data.id)
+      }
+      return d.parent ? { x: d.parent.x, y: d.parent.y } : { x: d.x, y: d.y }
+    }
+    // 折叠的枝收回到哪里：最近的「这一帧仍存在」的祖先的新位置
+    const exitTarget = (d) => {
+      let a = d.parent
+      while (a && !newPos.has(a.data.id)) a = a.parent
+      return a ? newPos.get(a.data.id) : { x: d.x, y: d.y }
+    }
+
+    const DUR = 480
+    const EXIT_DUR = 320
+    const EASE = d3.easeCubicOut
+    const diagonal = d3.linkHorizontal().x(d => d.y).y(d => d.x)
+    const collapsedPath = (pt) => diagonal({ source: pt, target: pt })
+
+    // ── 链接线：keyed join + 生长/收回过渡 ──
+    const linkKey = d => d.target.data.id
+    const linkSel = linkLayer.selectAll('.link').data(links, linkKey)
+
+    const linkEnter = linkSel.enter().append('path')
       .attr('class', 'link')
+      .attr('fill', 'none')
+      .attr('stroke-linecap', 'round')
+      .attr('opacity', 0)
+      .attr('d', d => {
+        const o = firstRender
+          ? { x: d.source.x, y: d.source.y }
+          : (prevPos.get(d.source.data.id) || { x: d.source.x, y: d.source.y })
+        return collapsedPath(o)
+      })
+
+    const linkMerged = linkEnter.merge(linkSel)
+    linkMerged
       .attr('data-target-id', d => d.target.data.id || '')
       .attr('data-flow', d => Number.isFinite(d.target.__flow) ? d.target.__flow.toFixed(4) : '')
       .attr('data-local-share', d => Number.isFinite(d.target.__localShare) ? d.target.__localShare.toFixed(4) : '')
@@ -410,18 +460,37 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('data-completeness', d => Number.isFinite(d.target.__completeness) ? d.target.__completeness.toFixed(2) : '')
       .attr('data-goal-fit', d => Number.isFinite(d.target.__goalFit) ? d.target.__goalFit.toFixed(2) : '')
       .attr('data-recommendation-rank', d => Number.isFinite(d.target.__recommendationRank) ? d.target.__recommendationRank.toFixed(2) : '')
+
+    // 入场枝：按深度错峰展开（树枝逐级伸展的关键）
+    const enterLinkMinDepth = d3.min(linkEnter.data(), d => d.target.depth) ?? 0
+    linkEnter.transition('grow').duration(DUR).ease(EASE)
+      .delay(d => Math.min((d.target.depth - enterLinkMinDepth) * 70, 560))
+      .attr('d', diagonal)
       .attr('stroke', d => d.target.__displayColor || '#64748b')
-      .call(selection => applyLinkStrokeWidth(selection))
+      .call(sel => applyLinkStrokeWidth(sel))
       .attr('opacity', d => linkOpacity(d))
-      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+
+    // 存量枝：平滑滑到新位置 + 更新粗细颜色
+    linkSel.transition('grow').duration(DUR).ease(EASE)
+      .attr('d', diagonal)
+      .attr('stroke', d => d.target.__displayColor || '#64748b')
+      .call(sel => applyLinkStrokeWidth(sel))
+      .attr('opacity', d => linkOpacity(d))
+
+    // 折叠的枝：缩回父节点后移除
+    linkSel.exit()
+      .transition('grow').duration(EXIT_DUR).ease(d3.easeCubicIn)
+      .attr('d', d => collapsedPath(exitTarget(d.target)))
+      .attr('opacity', 0)
+      .remove()
 
     // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
-    g.selectAll('.terminal-branch-add-hit')
-      .data(terminalLinks)
+    hitLayer.selectAll('.terminal-branch-add-hit')
+      .data(terminalLinks, linkKey)
       .join('path')
       .attr('class', 'terminal-branch-add-hit')
       .attr('data-target-id', d => d.target.data.id || '')
-      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+      .attr('d', diagonal)
       .attr('fill', 'none')
       .attr('stroke', 'transparent')
       .attr('stroke-width', d => Math.max(TERMINAL_BRANCH_HIT_WIDTH, linkStrokeWidth(d) + 10))
@@ -429,14 +498,45 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('pointer-events', 'stroke')
       .style('cursor', 'crosshair')
 
-    // 节点组
-    const node = g.selectAll('.node')
-      .data(nodes)
-      .join('g')
+    // ── 节点组：keyed join，新节点从父位置生长，折叠节点缩回父位置 ──
+    const nodeSel = nodeLayer.selectAll('.node').data(nodes, d => d.data.id)
+
+    const nodeEnter = nodeSel.enter().append('g')
       .attr('class', 'node')
       .attr('data-node-id', d => d.data.id || '')
-      .attr('transform', d => `translate(${d.y},${d.x})`)
+      .attr('opacity', 0)
+      .attr('transform', d => {
+        const o = growOrigin(d)
+        return `translate(${o.y},${o.x}) scale(0.35)`
+      })
+
+    const node = nodeEnter.merge(nodeSel)
       .style('cursor', 'pointer')
+
+    // 内容每帧重建（状态勾/到期标记/标签随数据变化），位置由 group 过渡负责
+    node.each(function () { d3.select(this).selectAll('*').remove() })
+
+    const enterNodeMinDepth = d3.min(nodeEnter.data(), d => d.depth) ?? 0
+    nodeEnter.transition('grow').duration(DUR).ease(EASE)
+      .delay(d => Math.min((d.depth - enterNodeMinDepth) * 70, 560))
+      .attr('opacity', 1)
+      .attr('transform', d => `translate(${d.y},${d.x}) scale(1)`)
+
+    nodeSel.transition('grow').duration(DUR).ease(EASE)
+      .attr('opacity', 1)
+      .attr('transform', d => `translate(${d.y},${d.x}) scale(1)`)
+
+    nodeSel.exit()
+      .transition('grow').duration(EXIT_DUR).ease(d3.easeCubicIn)
+      .attr('opacity', 0)
+      .attr('transform', d => {
+        const t = exitTarget(d)
+        return `translate(${t.y},${t.x}) scale(0.3)`
+      })
+      .remove()
+
+    // 记录本帧位置，供下一帧生长/收回动画使用
+    prevPosRef.current = newPos
 
     // 单击：选中节点
     node.filter(d => d.data.type !== 'root')
@@ -522,12 +622,14 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('filter', d => nodeFilter(d))
       .style('cursor', 'grab')
       .on('mouseenter', function (event, d) {
-        d3.select(this).attr('r', getNodeRadius(d.data.type) * 1.14)
+        d3.select(this).transition('hover').duration(140).ease(d3.easeCubicOut)
+          .attr('r', getNodeRadius(d.data.type) * 1.16)
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', addDisabledRef.current ? 0 : 1)
         d3.select(this.parentNode).select('.node-status-mark').attr('opacity', 0)
       })
       .on('mouseleave', function (event, d) {
-        d3.select(this).attr('r', getNodeRadius(d.data.type))
+        d3.select(this).transition('hover').duration(180).ease(d3.easeCubicOut)
+          .attr('r', getNodeRadius(d.data.type))
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', 0)
         d3.select(this.parentNode).select('.node-status-mark').attr('opacity', 1)
       })
