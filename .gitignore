@@ -43,6 +43,9 @@ Thumbs.db
 # Claude Code 个人本地配置（团队共享的 settings.json 保留）
 .claude/settings.local.json
 
+# AI 会话交接文档（本地上下文用，不进仓库历史）
+AI_HANDOFF.md
+
 # Temp files
 /tmp/
 .cache/
