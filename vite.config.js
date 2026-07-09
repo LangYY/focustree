@@ -5,7 +5,8 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    host: '127.0.0.1',
+    // 监听所有地址：localhost 无论解析到 127.0.0.1 还是 ::1 都能连上
+    host: true,
     port: 5173,
     strictPort: true,
     proxy: {
