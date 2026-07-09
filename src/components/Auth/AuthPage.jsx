@@ -17,33 +17,34 @@ export default function AuthPage() {
           alignItems: 'center',
           justifyContent: 'center',
           height: '100vh',
-          background: '#0f1117',
-          color: '#e5e7eb',
+          background: 'var(--color-surface)',
+          color: 'var(--color-ink)',
         }}
       >
         <div
           style={{
             width: 420,
-            background: '#1a1d27',
+            background: 'var(--color-panel)',
             borderRadius: 16,
             padding: '36px',
-            border: '1px solid #2d3148',
+            border: '1px solid var(--color-line)',
+            boxShadow: 'var(--shadow-soft)',
             boxSizing: 'border-box',
           }}
         >
-          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>还没有连接 Supabase</div>
-          <div style={{ fontSize: 14, lineHeight: 1.7, color: '#9ca3af', marginBottom: 18 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10, fontFamily: 'var(--font-display)' }}>还没有连接 Supabase</div>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-ink-soft)', marginBottom: 18 }}>
             FocusTree 已经启动，但还不能登录和保存数据。配置本地环境变量后重启应用即可使用。
           </div>
           <div
             style={{
-              background: '#0f1117',
-              border: '1px solid #2d3148',
+              background: 'var(--color-panel-soft)',
+              border: '1px solid var(--color-line)',
               borderRadius: 10,
               padding: '14px 16px',
               fontSize: 13,
               lineHeight: 1.8,
-              color: '#cbd5e1',
+              color: 'var(--color-ink-soft)',
               fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
               wordBreak: 'break-all',
             }}
@@ -88,6 +89,18 @@ export default function AuthPage() {
     }
   }
 
+  const inputStyle = {
+    width: '100%',
+    padding: '10px 14px',
+    background: 'var(--color-panel)',
+    border: '1px solid var(--color-line-strong)',
+    borderRadius: 8,
+    color: 'var(--color-ink)',
+    fontSize: 14,
+    outline: 'none',
+    boxSizing: 'border-box',
+  }
+
   return (
     <div
       style={{
@@ -95,30 +108,30 @@ export default function AuthPage() {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: '#0f1117',
+        background: 'var(--color-surface)',
       }}
     >
       <div
         style={{
           width: 360,
-          background: '#1a1d27',
+          background: 'var(--color-panel)',
           borderRadius: 16,
           padding: '40px 36px',
-          border: '1px solid #2d3148',
+          border: '1px solid var(--color-line)',
+          boxShadow: 'var(--shadow-lift)',
         }}
       >
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>FT</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#e5e7eb' }}>专注树</div>
-          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>你的外置大脑</div>
+          <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--color-ink)', fontFamily: 'var(--font-display)', letterSpacing: '0.12em' }}>专注树</div>
+          <div style={{ fontSize: 13, color: 'var(--color-ink-faint)', marginTop: 6 }}>你的外置大脑</div>
         </div>
 
         {/* Tab 切换 */}
         <div
           style={{
             display: 'flex',
-            background: '#0f1117',
+            background: 'var(--color-panel-soft)',
             borderRadius: 10,
             padding: 4,
             marginBottom: 24,
@@ -136,8 +149,9 @@ export default function AuthPage() {
                 cursor: 'pointer',
                 fontSize: 14,
                 fontWeight: 500,
-                background: mode === m ? '#2d3148' : 'transparent',
-                color: mode === m ? '#e5e7eb' : '#6b7280',
+                background: mode === m ? 'var(--color-panel)' : 'transparent',
+                color: mode === m ? 'var(--color-ink)' : 'var(--color-ink-faint)',
+                boxShadow: mode === m ? 'var(--shadow-soft)' : 'none',
                 transition: 'all 0.2s',
               }}
             >
@@ -149,7 +163,7 @@ export default function AuthPage() {
         {/* 表单 */}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 13, color: '#9ca3af', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--color-ink-soft)', marginBottom: 6 }}>
               邮箱
             </label>
             <input
@@ -158,22 +172,12 @@ export default function AuthPage() {
               onChange={e => setEmail(e.target.value)}
               required
               placeholder="you@example.com"
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                background: '#0f1117',
-                border: '1px solid #2d3148',
-                borderRadius: 8,
-                color: '#e5e7eb',
-                fontSize: 14,
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
+              style={inputStyle}
             />
           </div>
 
           <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', fontSize: 13, color: '#9ca3af', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--color-ink-soft)', marginBottom: 6 }}>
               密码
             </label>
             <input
@@ -183,27 +187,17 @@ export default function AuthPage() {
               required
               placeholder="至少 6 位"
               minLength={6}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                background: '#0f1117',
-                border: '1px solid #2d3148',
-                borderRadius: 8,
-                color: '#e5e7eb',
-                fontSize: 14,
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
+              style={inputStyle}
             />
           </div>
 
           {error && (
-            <div style={{ color: '#f87171', fontSize: 13, marginBottom: 16, textAlign: 'center' }}>
+            <div style={{ color: 'var(--color-danger)', fontSize: 13, marginBottom: 16, textAlign: 'center' }}>
               {error}
             </div>
           )}
           {message && (
-            <div style={{ color: '#4ade80', fontSize: 13, marginBottom: 16, textAlign: 'center' }}>
+            <div style={{ color: 'var(--color-accent)', fontSize: 13, marginBottom: 16, textAlign: 'center' }}>
               {message}
             </div>
           )}
@@ -214,7 +208,7 @@ export default function AuthPage() {
             style={{
               width: '100%',
               padding: '11px 0',
-              background: loading ? '#374151' : '#3b82f6',
+              background: loading ? 'var(--color-ink-ghost)' : 'var(--color-accent)',
               color: '#fff',
               border: 'none',
               borderRadius: 8,

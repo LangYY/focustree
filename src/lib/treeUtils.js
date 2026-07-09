@@ -175,11 +175,11 @@ export function isUrgentPriority(value) {
 }
 
 export function getNodeColor(node) {
-  if (node.status === 'done') return '#22c55e'
-  if (node.status === 'dormant') return '#eab308'
-  if (node.type === 'project') return node.color || '#6b7280'
-  if (node.type === 'category') return '#9ca3af'
-  return '#d1d5db'
+  if (node.status === 'done') return '#4A8C5C'
+  if (node.status === 'dormant') return '#A8862E'
+  if (node.type === 'project') return node.color || '#77796A'
+  if (node.type === 'category') return '#8A9489'
+  return '#A9B0A3'
 }
 
 export function getLinkStrokeWidth(flow = 1) {

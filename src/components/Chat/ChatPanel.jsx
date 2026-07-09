@@ -95,7 +95,7 @@ function MessageContent({ content, nameToId, onHoverNode }) {
           onMouseEnter={() => linked && onHoverNode?.(seg.nodeId)}
           onMouseLeave={() => linked && onHoverNode?.(null)}
           className={linked
-            ? 'cursor-pointer underline decoration-dotted decoration-blue-400/50 underline-offset-2 hover:text-blue-300 hover:decoration-blue-300 transition-colors'
+            ? 'cursor-pointer underline decoration-dotted decoration-accent/50 underline-offset-2 hover:text-accent-strong hover:decoration-accent transition-colors'
             : ''
           }
         >
@@ -110,13 +110,13 @@ function MessageContent({ content, nameToId, onHoverNode }) {
     <div className="whitespace-pre-wrap">
       {lines.map((line, i) => {
         if (line.startsWith('[OK]') || line.startsWith('✅')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-green-400 bg-green-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'mt-1.5 text-xs text-accent-strong bg-accent-soft rounded-lg px-2 py-1')
         }
         if (line.startsWith('[目标]') || line.startsWith('🎯')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-emerald-300 bg-emerald-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'mt-1.5 text-xs text-accent-strong bg-accent-soft rounded-lg px-2 py-1')
         }
         if (line.startsWith('[-]') || line.startsWith('⚠️')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-amber-300 bg-amber-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'mt-1.5 text-xs text-warn bg-warn-soft rounded-lg px-2 py-1')
         }
         return renderLine(line, i, '')
       })}
@@ -148,71 +148,71 @@ function ThinkingCard({ thinking }) {
     <div className="mt-2 text-xs">
       <button
         onClick={() => setOpen(o => !o)}
-        className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+        className="text-[11px] text-ink-faint hover:text-ink-soft transition-colors"
       >
         {open ? '[-]' : '[+]'} {hasStructuring ? '为什么这样整理' : '为什么这样推荐'}
       </button>
       {open && (
-        <div className="mt-1.5 p-2.5 bg-gray-950/60 border border-gray-800 rounded-lg space-y-2 text-[11px] leading-relaxed">
+        <div className="mt-1.5 p-2.5 bg-panel-soft/60 border border-line rounded-lg space-y-2 text-[11px] leading-relaxed">
           {brief_rationale && (
-            <Row label="判断" value={brief_rationale} valueColor="text-gray-300" multi />
+            <Row label="判断" value={brief_rationale} valueColor="text-ink-soft" multi />
           )}
           {Array.isArray(situation_map) && situation_map.length > 0 && (
-            <ListRow label="局面" items={situation_map} valueColor="text-gray-300" />
+            <ListRow label="局面" items={situation_map} valueColor="text-ink-soft" />
           )}
           {Array.isArray(proposed_panel_changes) && proposed_panel_changes.length > 0 && (
-            <ListRow label="面板建议" items={proposed_panel_changes} valueColor="text-blue-300" />
+            <ListRow label="面板建议" items={proposed_panel_changes} valueColor="text-accent" />
           )}
           {(goal_usage_mode || goal_usage_reason) && (
             <Row
               label="目标使用"
               value={`${goalUsageLabel(goal_usage_mode)}${goal_usage_reason ? `：${goal_usage_reason}` : ''}`}
-              valueColor="text-gray-300"
+              valueColor="text-ink-soft"
               multi
             />
           )}
           {Array.isArray(assumptions) && assumptions.length > 0 && (
-            <ListRow label="假设" items={assumptions} valueColor="text-gray-400" />
+            <ListRow label="假设" items={assumptions} valueColor="text-ink-faint" />
           )}
           {Array.isArray(open_questions) && open_questions.length > 0 && (
-            <ListRow label="待确认" items={open_questions} valueColor="text-amber-300" />
+            <ListRow label="待确认" items={open_questions} valueColor="text-warn" />
           )}
           {Array.isArray(preserved_inputs) && preserved_inputs.length > 0 && (
-            <ListRow label="保留" items={preserved_inputs} valueColor="text-emerald-300" />
+            <ListRow label="保留" items={preserved_inputs} valueColor="text-accent" />
           )}
           {Array.isArray(merged_duplicates) && merged_duplicates.length > 0 && (
-            <ListRow label="合并" items={merged_duplicates} valueColor="text-blue-300" />
+            <ListRow label="合并" items={merged_duplicates} valueColor="text-accent" />
           )}
           {Array.isArray(deferred_or_unsure) && deferred_or_unsure.length > 0 && (
-            <ListRow label="暂缓" items={deferred_or_unsure} valueColor="text-amber-300" />
+            <ListRow label="暂缓" items={deferred_or_unsure} valueColor="text-warn" />
           )}
           {user_goal && (
-            <Row label="目标" value={user_goal} valueColor="text-gray-300" />
+            <Row label="目标" value={user_goal} valueColor="text-ink-soft" />
           )}
           {next_concrete_step && (
-            <Row label="下一步" value={next_concrete_step} valueColor="text-blue-300" emphasis />
+            <Row label="下一步" value={next_concrete_step} valueColor="text-accent" emphasis />
           )}
           {success_criterion && (
-            <Row label="完成标准" value={success_criterion} valueColor="text-gray-300" />
+            <Row label="完成标准" value={success_criterion} valueColor="text-ink-soft" />
           )}
           {tradeoff_analysis && (
-            <Row label="权衡" value={tradeoff_analysis} valueColor="text-gray-300" multi />
+            <Row label="权衡" value={tradeoff_analysis} valueColor="text-ink-soft" multi />
           )}
           {Array.isArray(traps_avoided) && traps_avoided.length > 0 && (
             <div>
-              <div className="text-gray-500 mb-0.5">规避陷阱</div>
+              <div className="text-ink-faint mb-0.5">规避陷阱</div>
               <ul className="space-y-0.5 pl-1">
                 {traps_avoided.map((t, i) => (
-                  <li key={i} className="text-amber-300">· {t}</li>
+                  <li key={i} className="text-warn">· {t}</li>
                 ))}
               </ul>
             </div>
           )}
           {leverage_insight && (
-            <Row label="杠杆点" value={leverage_insight} valueColor="text-emerald-300" />
+            <Row label="杠杆点" value={leverage_insight} valueColor="text-accent" />
           )}
           {risk_if_skipped && (
-            <Row label="不做的代价" value={risk_if_skipped} valueColor="text-rose-300" />
+            <Row label="不做的代价" value={risk_if_skipped} valueColor="text-danger" />
           )}
         </div>
       )}
@@ -246,22 +246,22 @@ function DraftPlanCard({ thinking, applied, onApply }) {
   const preview = actions.slice(0, 5).map(action => action.name || action.id || '未命名节点')
 
   return (
-    <div className="mt-2 border-t border-gray-700/70 pt-2 text-[11px] leading-relaxed">
+    <div className="mt-2 border-t border-line pt-2 text-[11px] leading-relaxed">
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <div>
-          <span className="text-blue-300 font-medium">结构草案</span>
-          <span className="text-gray-500 ml-1">{summaryText || `${actions.length} 项`}</span>
+          <span className="text-accent font-medium">结构草案</span>
+          <span className="text-ink-faint ml-1">{summaryText || `${actions.length} 项`}</span>
         </div>
         <button
           onClick={onApply}
           disabled={applied || !onApply}
-          className="text-[11px] px-2 py-1 rounded-md bg-blue-700/80 hover:bg-blue-600 text-white disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
+          className="text-[11px] px-2 py-1 rounded-md bg-accent hover:bg-accent-strong text-white disabled:bg-panel-soft disabled:text-ink-ghost transition-colors"
         >
           {applied ? '已应用' : '应用到面板'}
         </button>
       </div>
       {preview.length > 0 && (
-        <div className="text-gray-500">
+        <div className="text-ink-faint">
           {preview.join('、')}{actions.length > preview.length ? ` 等 ${actions.length} 项` : ''}
         </div>
       )}
@@ -284,48 +284,48 @@ function WeightPlanCard({ thinking, applied, onApply }) {
   const scopeLabel = strategy.scope === 'nested' ? '子分支精力配比' : '顶层精力配比'
 
   return (
-    <div className="mt-2 border-t border-gray-700/70 pt-2 text-[11px] leading-relaxed">
+    <div className="mt-2 border-t border-line pt-2 text-[11px] leading-relaxed">
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <div>
-          <span className="text-violet-300 font-medium">权重方案</span>
-          <span className="text-gray-500 ml-1">
+          <span className="text-accent font-medium">权重方案</span>
+          <span className="text-ink-faint ml-1">
             {scopeLabel}：{totalPct}%
           </span>
         </div>
         <button
           onClick={onApply}
           disabled={applied || blocked || !onApply}
-          className="text-[11px] px-2 py-1 rounded-md bg-violet-700/80 hover:bg-violet-600 text-white disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
+          className="text-[11px] px-2 py-1 rounded-md bg-accent hover:bg-accent-strong text-white disabled:bg-panel-soft disabled:text-ink-ghost transition-colors"
         >
           {applied ? '已应用' : blocked ? '需确认' : '应用权重方案'}
         </button>
       </div>
 
       {needsNormalization && (
-        <div className="mb-1.5 text-amber-300">
+        <div className="mb-1.5 text-warn">
           这是相对权重，应用时会归一化为 100%。
         </div>
       )}
       {strategy.conflict_note && (
-        <div className="mb-1.5 text-amber-300">{strategy.conflict_note}</div>
+        <div className="mb-1.5 text-warn">{strategy.conflict_note}</div>
       )}
       {conflicts.length > 0 && (
         <ul className="mb-1.5 space-y-0.5">
           {conflicts.map((item, index) => (
-            <li key={index} className="text-amber-300">· {item}</li>
+            <li key={index} className="text-warn">· {item}</li>
           ))}
         </ul>
       )}
 
       <div className="space-y-1.5">
         {proposals.map((proposal, index) => (
-          <div key={`${proposal.name}-${index}`} className="pl-2 border-l border-violet-800/60">
+          <div key={`${proposal.name}-${index}`} className="pl-2 border-l border-line-strong">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-gray-200">{proposal.name}</span>
-              <span className="text-violet-300 font-medium">{Math.round(proposal.share * 100)}%</span>
+              <span className="text-ink">{proposal.name}</span>
+              <span className="text-accent font-medium">{Math.round(proposal.share * 100)}%</span>
             </div>
             {typeof proposal.confidence === 'number' && (
-              <div className="text-gray-600 mt-0.5">置信 {Math.round(proposal.confidence * 100)}%</div>
+              <div className="text-ink-ghost mt-0.5">置信 {Math.round(proposal.confidence * 100)}%</div>
             )}
           </div>
         ))}
@@ -350,10 +350,10 @@ function normalizeWeightProposal(item) {
   }
 }
 
-function ListRow({ label, items, valueColor = 'text-gray-300' }) {
+function ListRow({ label, items, valueColor = 'text-ink-soft' }) {
   return (
     <div>
-      <div className="text-gray-500 mb-0.5">{label}</div>
+      <div className="text-ink-faint mb-0.5">{label}</div>
       <ul className="space-y-0.5 pl-1">
         {items.map((item, i) => (
           <li key={i} className={valueColor}>· {item}</li>
@@ -363,10 +363,10 @@ function ListRow({ label, items, valueColor = 'text-gray-300' }) {
   )
 }
 
-function Row({ label, value, valueColor = 'text-gray-300', emphasis, multi }) {
+function Row({ label, value, valueColor = 'text-ink-soft', emphasis, multi }) {
   return (
-    <div className={emphasis ? 'border-l-2 border-blue-500/40 pl-2' : ''}>
-      <span className="text-gray-500">{label} · </span>
+    <div className={emphasis ? 'border-l-2 border-accent/40 pl-2' : ''}>
+      <span className="text-ink-faint">{label} · </span>
       {multi
         ? <div className={`mt-0.5 ${valueColor}`}>{value}</div>
         : <span className={valueColor}>{value}</span>
@@ -383,27 +383,27 @@ function GoalBanner({ goalText, goalExpired, onEdit, onClear }) {
     return (
       <div
         onClick={onEdit}
-        className="cursor-pointer px-3 py-2 bg-gray-800/40 border-b border-gray-800 hover:bg-gray-800/70 transition-colors"
+        className="cursor-pointer px-3 py-2 bg-panel-soft/50 border-b border-line hover:bg-panel-soft transition-colors"
       >
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider">当前阶段目标</div>
-        <div className="text-xs text-gray-500 mt-0.5">
-          点击设置 · 或输入 <code className="text-gray-400">/目标 ...</code>
+        <div className="text-[10px] text-ink-faint uppercase tracking-wider">当前阶段目标</div>
+        <div className="text-xs text-ink-faint mt-0.5">
+          点击设置 · 或输入 <code className="text-ink-faint">/目标 ...</code>
         </div>
       </div>
     )
   }
   return (
-    <div className="px-3 py-2 bg-emerald-950/40 border-b border-emerald-900/40 group">
+    <div className="px-3 py-2 bg-accent-soft/60 border-b border-accent/20 group">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-emerald-500 uppercase tracking-wider">
-          当前阶段目标 {goalExpired && <span className="text-amber-400">· 已过期</span>}
+        <div className="text-[10px] text-accent uppercase tracking-wider">
+          当前阶段目标 {goalExpired && <span className="text-warn">· 已过期</span>}
         </div>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-          <button onClick={onEdit}  className="text-[10px] text-gray-400 hover:text-gray-200">改</button>
-          <button onClick={onClear} className="text-[10px] text-gray-400 hover:text-gray-200">清</button>
+          <button onClick={onEdit}  className="text-[10px] text-ink-faint hover:text-ink">改</button>
+          <button onClick={onClear} className="text-[10px] text-ink-faint hover:text-ink">清</button>
         </div>
       </div>
-      <div className="text-xs text-emerald-200 mt-0.5 leading-relaxed">{goalText}</div>
+      <div className="text-xs text-accent-strong mt-0.5 leading-relaxed">{goalText}</div>
     </div>
   )
 }
@@ -509,7 +509,7 @@ export default function ChatPanel({
 
   return (
     <div
-      className="flex flex-col h-full bg-gray-900 border-l border-gray-800"
+      className="flex flex-col h-full bg-panel border-l border-line"
       style={{
         width: isOpen ? 320 : 0,
         minWidth: isOpen ? 320 : 0,
@@ -518,15 +518,15 @@ export default function ChatPanel({
       }}
     >
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-800 flex-shrink-0 flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-300">AI 助理</span>
+      <div className="px-4 py-3 border-b border-line flex-shrink-0 flex items-center justify-between">
+        <span className="text-sm font-semibold font-display tracking-wide text-ink">AI 助理</span>
         <div className="flex items-center gap-2">
           {onTriggerReview && (
             <button
               onClick={onTriggerReview}
               disabled={reviewGenerating}
               title="生成本周回顾"
-              className="text-[11px] text-gray-500 hover:text-indigo-300 transition-colors disabled:opacity-50"
+              className="text-[11px] text-ink-faint hover:text-accent transition-colors disabled:opacity-50"
             >
               {reviewGenerating ? '回顾中…' : '回顾'}
             </button>
@@ -535,11 +535,11 @@ export default function ChatPanel({
             <button
               onClick={onOpenRecommendations}
               title={hitRate?.total ? `命中率 ${Math.round((hitRate.completed/hitRate.total)*100)}%` : 'AI 推荐记录'}
-              className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1"
+              className="text-[11px] text-ink-faint hover:text-ink-soft transition-colors flex items-center gap-1"
             >
               推荐
               {hitRate?.total > 0 && (
-                <span className="text-[10px] text-emerald-400">
+                <span className="text-[10px] text-accent">
                   {Math.round((hitRate.completed / hitRate.total) * 100)}%
                 </span>
               )}
@@ -549,7 +549,7 @@ export default function ChatPanel({
             <button
               onClick={onOpenHistory}
               title="查看历史对话"
-              className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-[11px] text-ink-faint hover:text-ink-soft transition-colors"
             >
               历史
             </button>
@@ -558,7 +558,7 @@ export default function ChatPanel({
             <button
               onClick={onOpenLearned}
               title="AI 学到的关于你的事"
-              className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-[11px] text-ink-faint hover:text-ink-soft transition-colors"
             >
               记忆
             </button>
@@ -567,7 +567,7 @@ export default function ChatPanel({
             <button
               onClick={handleResetClick}
               title="开始新对话（旧对话保留可查）"
-              className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-[11px] text-ink-faint hover:text-ink-soft transition-colors"
             >
               新对话
             </button>
@@ -577,7 +577,7 @@ export default function ChatPanel({
               value={model || 'auto'}
               onChange={e => onModelChange(e.target.value)}
               title={MODEL_OPTIONS.find(o => o.value === (model || 'auto'))?.hint}
-              className="bg-gray-800 text-gray-300 text-[11px] border border-gray-700 rounded px-1.5 py-0.5 outline-none focus:border-blue-500 cursor-pointer"
+              className="bg-panel-soft text-ink-soft text-[11px] border border-line rounded px-1.5 py-0.5 outline-none focus:border-accent cursor-pointer"
             >
               {MODEL_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -602,8 +602,8 @@ export default function ChatPanel({
           if (msg.kind === 'weekly_review') {
             return (
               <div key={msg.id} className="flex justify-start">
-                <div className="max-w-[95%] w-full bg-gradient-to-br from-indigo-950/60 to-gray-900 border border-indigo-800/40 rounded-2xl px-3 py-3 text-sm leading-relaxed">
-                  <div className="text-[10px] text-indigo-400 uppercase tracking-wider mb-1.5">
+                <div className="max-w-[95%] w-full bg-gradient-to-br from-accent-soft/70 to-panel border border-accent/20 rounded-2xl px-3 py-3 text-sm leading-relaxed">
+                  <div className="text-[10px] text-accent uppercase tracking-wider mb-1.5">
                     本周回顾
                   </div>
                   <MessageContent
@@ -623,8 +623,8 @@ export default function ChatPanel({
               <div
                 className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                   msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-sm'
-                    : 'bg-gray-800 text-gray-200 rounded-bl-sm'
+                    ? 'bg-accent text-white rounded-br-sm'
+                    : 'bg-panel-soft text-ink rounded-bl-sm'
                 }`}
               >
                 <MessageContent
@@ -651,7 +651,7 @@ export default function ChatPanel({
                 )}
                 {msg.role === 'assistant' && msg.model_used && (
                   <div
-                    className="mt-1 text-[10px] text-gray-500"
+                    className="mt-1 text-[10px] text-ink-faint"
                     title={msg.usage_cost
                       ? `输入 ${msg.usage_cost.prompt_tokens || 0} tokens（缓存 ${msg.usage_cost.cached_input_tokens || 0}，未命中 ${msg.usage_cost.uncached_input_tokens || 0}），输出 ${msg.usage_cost.completion_tokens || 0} tokens`
                       : undefined
@@ -665,7 +665,7 @@ export default function ChatPanel({
                   </div>
                 )}
                 {msg.role === 'assistant' && msg.kind === 'local' && (
-                  <div className="mt-1 text-[10px] text-gray-600">
+                  <div className="mt-1 text-[10px] text-ink-ghost">
                     本地算法 · 0 token
                     {formatLocalRoute(msg.local_route) && ` · ${formatLocalRoute(msg.local_route)}`}
                   </div>
@@ -674,7 +674,7 @@ export default function ChatPanel({
                   <button
                     onClick={() => onRetry(treeData)}
                     disabled={isLoading}
-                    className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 border border-amber-700/50 hover:border-amber-600/50 rounded px-2 py-0.5 transition-colors disabled:opacity-50"
+                    className="mt-1.5 text-[11px] text-warn border border-warn/50 hover:border-warn/80 rounded px-2 py-0.5 transition-colors disabled:opacity-50"
                   >
                     重试
                   </button>
@@ -686,10 +686,10 @@ export default function ChatPanel({
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 text-gray-400 px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
+            <div className="bg-panel-soft text-ink-faint px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
               <span className="animate-pulse">...</span>
               {pendingCount > 0 && (
-                <span className="ml-2 text-amber-400 text-[11px]">
+                <span className="ml-2 text-warn text-[11px]">
                   还有 {pendingCount} 条消息等待处理
                 </span>
               )}
@@ -700,7 +700,7 @@ export default function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0 px-3 pb-4 pt-2 border-t border-gray-800">
+      <div className="flex-shrink-0 px-3 pb-4 pt-2 border-t border-line">
         <div className="flex gap-2 items-end">
           <textarea
             ref={textareaRef}
@@ -714,17 +714,17 @@ export default function ChatPanel({
             onKeyDown={handleKeyDown}
             placeholder="说点什么…（试试 /目标 设置当前阶段目标）"
             rows={2}
-            className="flex-1 bg-gray-800 text-gray-200 placeholder-gray-500 text-sm px-3 py-2 rounded-xl resize-vertical outline-none focus:ring-1 focus:ring-blue-500"
+            className="flex-1 bg-panel-soft text-ink placeholder-ink-ghost text-sm px-3 py-2 rounded-xl resize-vertical outline-none focus:ring-1 focus:ring-accent"
             style={{ maxHeight: 200, minHeight: 44 }}
           />
           {isLoading ? (
             <button
               onClick={() => onCancel?.()}
-              className="flex-shrink-0 bg-red-600 hover:bg-red-500 text-white text-sm px-3 py-2 rounded-xl transition-colors relative"
+              className="flex-shrink-0 bg-danger hover:bg-danger/90 text-white text-sm px-3 py-2 rounded-xl transition-colors relative"
             >
               停止
               {pendingCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
+                <span className="absolute -top-1.5 -right-1.5 bg-warn text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
                   {pendingCount}
                 </span>
               )}
@@ -733,7 +733,7 @@ export default function ChatPanel({
             <button
               onClick={handleSend}
               disabled={!input.trim()}
-              className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-2 rounded-xl transition-colors"
+              className="flex-shrink-0 bg-accent hover:bg-accent-strong disabled:bg-panel-soft disabled:text-ink-ghost text-white text-sm px-3 py-2 rounded-xl transition-colors"
             >
               发送
             </button>

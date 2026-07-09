@@ -1,20 +1,78 @@
 @import "tailwindcss";
 
+/* ── 设计 token：温润自然风 ─────────────────────────────
+   米白纸面基底 + 墨绿主色 + 大地色点缀，衬线标题。
+   所有组件只允许引用这里的语义色，不允许再写 gray-* / 裸 hex。 */
+@theme {
+  /* 基底面 */
+  --color-surface: #F6F2E8;       /* 应用底：米白纸面 */
+  --color-panel: #FDFBF4;         /* 浮起面板：暖白 */
+  --color-panel-soft: #EFE9D9;    /* 次级填充 / hover 底 */
+  --color-line: #E2DAC6;          /* 常规描边 */
+  --color-line-strong: #CBC0A4;   /* 强调描边 */
+
+  /* 墨色文字（带一点绿意） */
+  --color-ink: #2C382F;           /* 标题 / 主文字 */
+  --color-ink-soft: #57675B;      /* 正文次级 */
+  --color-ink-faint: #8A9489;     /* 辅助说明 */
+  --color-ink-ghost: #B2BAAE;     /* 占位 / 禁用 */
+
+  /* 主色：墨绿 */
+  --color-accent: #3E7050;
+  --color-accent-strong: #2C5A3E;
+  --color-accent-soft: #E2EDE2;
+
+  /* 状态色（浅底适配） */
+  --color-warn: #A97E22;
+  --color-warn-soft: #F3E9CD;
+  --color-danger: #B0523C;
+  --color-danger-soft: #F4E1DA;
+
+  /* 字体 */
+  --font-display: 'Songti SC', 'STSong', 'Noto Serif SC', 'Source Han Serif SC', Georgia, 'Times New Roman', serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif;
+
+  /* 阴影：纸面上的柔和投影 */
+  --shadow-soft: 0 2px 10px rgba(62, 54, 38, 0.08), 0 1px 3px rgba(62, 54, 38, 0.06);
+  --shadow-lift: 0 10px 32px rgba(62, 54, 38, 0.14), 0 2px 8px rgba(62, 54, 38, 0.08);
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0f1117;
-  color: #e5e7eb;
+  font-family: var(--font-sans);
+  background: var(--color-surface);
+  color: var(--color-ink);
   overflow: hidden;
 }
 
 #root {
   width: 100%;
   height: 100vh;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+/* 浅色滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-ghost);
 }
 
 .node circle {

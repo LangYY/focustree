@@ -1,6 +1,6 @@
 import { PRIORITY_LABELS, getNodeDueState } from '../../lib/treeUtils'
 
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
+const STATUS_COLOR = { active: '#3E7050', done: '#4A8C5C', dormant: '#A8862E' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
 
 function safeRatio(value, fallback = 1) {
@@ -35,9 +35,9 @@ export default function NodeTooltip({ x, y, node }) {
   return (
     <div
       style={style}
-      className="bg-gray-900 border border-gray-700 rounded-xl shadow-xl px-3 py-2.5 text-xs max-w-48"
+      className="bg-panel border border-line rounded-xl shadow-lift px-3 py-2.5 text-xs max-w-48"
     >
-      <div className="font-semibold text-gray-100 mb-1">{node.name}</div>
+      <div className="font-semibold text-ink mb-1">{node.name}</div>
 
       <div className="flex items-center gap-1.5 mb-1">
         <span
@@ -45,31 +45,31 @@ export default function NodeTooltip({ x, y, node }) {
             display: 'inline-block',
             width: 6, height: 6,
             borderRadius: '50%',
-            background: STATUS_COLOR[node.status] || '#6b7280',
+            background: STATUS_COLOR[node.status] || '#8A9489',
           }}
         />
-        <span className="text-gray-400">{STATUS_LABEL[node.status] || node.status}</span>
+        <span className="text-ink-faint">{STATUS_LABEL[node.status] || node.status}</span>
       </div>
 
       {(node.weight != null || node.__localShare != null || node.__flow != null) && (
-        <div className="text-gray-500">
+        <div className="text-ink-faint">
           有效权重 {effectivePct}%
           {showLocalShare && (
-            <span className="text-gray-600"> · 本级 {localPct}%</span>
+            <span className="text-ink-ghost"> · 本级 {localPct}%</span>
           )}
         </div>
       )}
 
-      <div className="text-gray-500 mt-0.5">
+      <div className="text-ink-faint mt-0.5">
         完整度 {completenessPct}% · 推荐分 {rankPct}%
       </div>
 
       {(priorityLabel || node.target_completion_date) && (
-        <div className="text-gray-500 mt-0.5">
+        <div className="text-ink-faint mt-0.5">
           {priorityLabel && <span>优先级 {priorityLabel}</span>}
-          {priorityLabel && node.target_completion_date && <span className="text-gray-700"> · </span>}
+          {priorityLabel && node.target_completion_date && <span className="text-ink-ghost"> · </span>}
           {node.target_completion_date && (
-            <span className={dueState?.state && dueState.state !== 'later' ? 'text-amber-300/90' : ''}>
+            <span className={dueState?.state && dueState.state !== 'later' ? 'text-warn/90' : ''}>
               {dueState?.label || node.target_completion_date}
             </span>
           )}
@@ -77,19 +77,19 @@ export default function NodeTooltip({ x, y, node }) {
       )}
 
       {Number.isFinite(pressure) && (
-        <div className="text-gray-600 mt-0.5">
+        <div className="text-ink-ghost mt-0.5">
           分支压力 {pressure.toFixed(1)}
         </div>
       )}
 
       {missingSlots.length > 0 && (
-        <div className="text-amber-400/80 mt-1">
+        <div className="text-warn/80 mt-1">
           缺：{missingSlots.slice(0, 3).join('、')}
         </div>
       )}
 
       {node.summary && (
-        <div className="text-gray-400 mt-1.5 border-t border-gray-800 pt-1.5 leading-relaxed">
+        <div className="text-ink-faint mt-1.5 border-t border-line pt-1.5 leading-relaxed">
           {node.summary}
         </div>
       )}

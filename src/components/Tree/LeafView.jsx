@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { getDerivedWeightMeta, getDerivedWeightMetaMap, getNodeDueState, PRIORITY_LABELS } from '../../lib/treeUtils'
 
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
+const STATUS_COLOR = { active: '#3E7050', done: '#4A8C5C', dormant: '#A8862E' }
 
 function safePercent(value) {
   const numeric = Number(value)
@@ -31,7 +31,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
       const pColor = node.type === 'project' ? node.color : projectColor
       node.children?.forEach(c => collect(c, pName, pColor))
     }
-    if (treeData) collect(treeData, '', '#6b7280')
+    if (treeData) collect(treeData, '', '#8A9489')
     return result.sort((a, b) => (b.recommendationRank || 0) - (a.recommendationRank || 0))
   }, [treeData, userGoal])
 
@@ -40,10 +40,10 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
   const done    = tasks.filter(t => t.status === 'done')
 
   return (
-    <div className="h-full overflow-y-auto p-6" style={{ background: '#0f1117' }}>
+    <div className="h-full overflow-y-auto p-6" style={{ background: 'var(--color-surface)' }}>
       <div className="max-w-2xl mx-auto">
-        <h2 className="text-lg font-semibold text-gray-200 mb-1">末端视图</h2>
-        <p className="text-sm text-gray-500 mb-6">所有任务，按推荐分排序</p>
+        <h2 className="text-lg font-semibold font-display text-ink mb-1">末端视图</h2>
+        <p className="text-sm text-ink-faint mb-6">所有任务，按推荐分排序</p>
 
         <Section title="进行中" tasks={active}   onStatusChange={onStatusChange} />
         <Section title="暂停中" tasks={dormant}  onStatusChange={onStatusChange} />
@@ -57,7 +57,7 @@ function Section({ title, tasks, onStatusChange, dimmed }) {
   if (tasks.length === 0) return null
   return (
     <div className="mb-8">
-      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+      <div className="text-xs font-semibold text-ink-faint uppercase tracking-wider mb-3">
         {title} · {tasks.length}
       </div>
       <div className="space-y-2">
@@ -76,8 +76,8 @@ function TaskRow({ task, onStatusChange, dimmed }) {
     <div
       className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
         dimmed
-          ? 'bg-gray-900/50 border-gray-800/50 opacity-50'
-          : 'bg-gray-900 border-gray-800 hover:border-gray-700'
+          ? 'bg-panel-soft/50 border-line opacity-50'
+          : 'bg-panel border-line hover:border-line'
       }`}
     >
       {/* 完成圆圈 */}
@@ -85,8 +85,8 @@ function TaskRow({ task, onStatusChange, dimmed }) {
         onClick={() => onStatusChange(task.id, task.status === 'done' ? 'active' : 'done')}
         className="flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors"
         style={{
-          borderColor: task.status === 'done' ? '#22c55e' : '#374151',
-          background:  task.status === 'done' ? '#22c55e' : 'transparent',
+          borderColor: task.status === 'done' ? '#4A8C5C' : '#CBC0A4',
+          background:  task.status === 'done' ? '#4A8C5C' : 'transparent',
         }}
       >
         {task.status === 'done' && <span className="text-white text-xs">✓</span>}
@@ -94,7 +94,7 @@ function TaskRow({ task, onStatusChange, dimmed }) {
 
       {/* 任务名 */}
       <div className="flex-1 min-w-0">
-        <div className={`text-sm text-gray-200 truncate ${task.status === 'done' ? 'line-through text-gray-500' : ''}`}>
+        <div className={`text-sm text-ink truncate ${task.status === 'done' ? 'line-through text-ink-faint' : ''}`}>
           {task.name}
         </div>
         {task.projectName && (
@@ -103,15 +103,15 @@ function TaskRow({ task, onStatusChange, dimmed }) {
               style={{ background: task.projectColor }}
               className="inline-block w-2 h-2 rounded-full flex-shrink-0"
             />
-            <span className="text-xs text-gray-500">{task.projectName}</span>
+            <span className="text-xs text-ink-faint">{task.projectName}</span>
             {priorityLabel && (
-              <span className={`text-xs ${task.current_priority === 'urgent' ? 'text-white' : 'text-gray-500'}`}>
+              <span className={`text-xs ${task.current_priority === 'urgent' ? 'text-danger' : 'text-ink-faint'}`}>
                 · {priorityLabel}
               </span>
             )}
             {task.target_completion_date && (
               <span className={`text-xs ${
-                dueState?.state && dueState.state !== 'later' ? 'text-amber-300' : 'text-gray-500'
+                dueState?.state && dueState.state !== 'later' ? 'text-warn' : 'text-ink-faint'
               }`}>
                 · {dueState?.label || task.target_completion_date}
               </span>
@@ -122,12 +122,12 @@ function TaskRow({ task, onStatusChange, dimmed }) {
 
       {/* 权重条 */}
       <div className="flex-shrink-0 w-16">
-        <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-panel-soft rounded-full overflow-hidden">
           <div
             className="h-full rounded-full"
             style={{
               width: `${safePercent(task.recommendationRank || task.effectiveWeight)}%`,
-              background: STATUS_COLOR[task.status] || '#6b7280',
+              background: STATUS_COLOR[task.status] || '#8A9489',
             }}
           />
         </div>

@@ -159,16 +159,16 @@ export default function NodeDetailPanel({
     : saveError || (invalidTitle ? '标题不能为空' : (canSave || planningDirty ? '等待自动保存' : '已保存'))
 
   return (
-    <aside className="w-[320px] min-w-[300px] max-w-[360px] border-l border-gray-800 bg-gray-950/98 text-gray-100 flex flex-col">
-      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+    <aside className="w-[320px] min-w-[300px] max-w-[360px] border-l border-line bg-panel/98 text-ink flex flex-col">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div>
-          <div className="text-[11px] text-gray-500">{typeLabel(node.type)}详情</div>
-          <div className={`text-xs ${saveError || invalidTitle ? 'text-amber-400' : 'text-gray-400'}`}>{saveStatus}</div>
+          <div className="text-[11px] text-ink-faint">{typeLabel(node.type)}详情</div>
+          <div className={`text-xs ${saveError || invalidTitle ? 'text-warn' : 'text-ink-faint'}`}>{saveStatus}</div>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="h-8 w-8 rounded-md border border-gray-800 text-gray-400 hover:border-gray-600 hover:text-gray-100"
+          className="h-8 w-8 rounded-md border border-line text-ink-faint hover:border-line-strong hover:text-ink"
           aria-label="关闭详情"
         >
           ×
@@ -176,7 +176,7 @@ export default function NodeDetailPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        <label className="mb-2 block text-xs text-gray-400">标题</label>
+        <label className="mb-2 block text-xs text-ink-faint">标题</label>
         <input
           value={title}
           onChange={event => {
@@ -196,11 +196,11 @@ export default function NodeDetailPanel({
               event.currentTarget.blur()
             }
           }}
-          className="mb-4 w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          className="mb-4 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
 
         <div className="mb-4">
-          <div className="mb-2 text-xs text-gray-400">状态</div>
+          <div className="mb-2 text-xs text-ink-faint">状态</div>
           <div className="grid grid-cols-3 gap-2">
             {STATUS_OPTIONS.map(option => (
               <button
@@ -209,8 +209,8 @@ export default function NodeDetailPanel({
                 onClick={() => onStatusChange?.(node.id, option.value)}
                 className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
                   node.status === option.value
-                    ? 'border-blue-500 bg-blue-600/25 text-blue-100'
-                    : 'border-gray-800 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-100'
+                    ? 'border-accent bg-accent-soft text-accent-strong'
+                    : 'border-line bg-panel text-ink-faint hover:border-line-strong hover:text-ink'
                 }`}
               >
                 {option.label}
@@ -220,7 +220,7 @@ export default function NodeDetailPanel({
         </div>
 
         <div className="mb-4">
-          <div className="mb-2 text-xs text-gray-400">当下优先级</div>
+          <div className="mb-2 text-xs text-ink-faint">当下优先级</div>
           <div className="grid grid-cols-5 gap-1.5">
             {PRIORITY_OPTIONS.map(option => {
               const value = option.value || ''
@@ -237,9 +237,9 @@ export default function NodeDetailPanel({
                   className={`rounded-md border px-1.5 py-1.5 text-xs transition-colors ${
                     active
                       ? value === 'urgent'
-                        ? 'border-white/70 bg-white/10 text-white shadow-[0_0_12px_rgba(255,255,255,0.12)]'
-                        : 'border-blue-500 bg-blue-600/20 text-blue-100'
-                      : 'border-gray-800 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-100'
+                        ? 'border-danger bg-danger-soft text-danger shadow-[0_0_12px_rgba(176,82,60,0.25)]'
+                        : 'border-accent bg-accent-soft text-accent-strong'
+                      : 'border-line bg-panel text-ink-faint hover:border-line-strong hover:text-ink'
                   }`}
                 >
                   {option.label}
@@ -251,10 +251,10 @@ export default function NodeDetailPanel({
 
         <div className="mb-4">
           <div className="mb-2 flex items-center justify-between">
-            <label htmlFor="node-target-date" className="text-xs text-gray-400">目标完成日期</label>
+            <label htmlFor="node-target-date" className="text-xs text-ink-faint">目标完成日期</label>
             {dueState?.state && dueState.state !== 'later' && (
               <span className={`text-[11px] ${
-                dueState.state === 'overdue' ? 'text-red-300' : 'text-amber-300'
+                dueState.state === 'overdue' ? 'text-danger' : 'text-warn'
               }`}>
                 {dueState.label}
               </span>
@@ -270,11 +270,11 @@ export default function NodeDetailPanel({
               setTargetDate(value)
               savePlanning({ targetDate: value })
             }}
-            className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+            className="w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
 
-        <label className="mb-2 block text-xs text-gray-400">详细想法</label>
+        <label className="mb-2 block text-xs text-ink-faint">详细想法</label>
         <textarea
           value={details}
           onChange={event => {
@@ -294,7 +294,7 @@ export default function NodeDetailPanel({
             }
           }}
           placeholder="补充背景、判断、卡点、下一步，或者这个步骤为什么重要。"
-          className="min-h-[220px] w-full resize-y rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm leading-6 text-gray-100 outline-none focus:border-blue-500"
+          className="min-h-[220px] w-full resize-y rounded-md border border-line bg-panel px-3 py-2 text-sm leading-6 text-ink outline-none focus:border-accent"
         />
       </div>
     </aside>

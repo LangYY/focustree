@@ -1,12 +1,12 @@
 import { useState } from 'react'
 
 const TIER_STYLES = {
-  '早上':  { color: 'text-amber-300',   bg: 'bg-amber-950/30',   icon: 'AM' },
-  '中午':  { color: 'text-orange-300',  bg: 'bg-orange-950/30',  icon: 'NOON' },
-  '下午':  { color: 'text-sky-300',     bg: 'bg-sky-950/30',     icon: 'PM' },
-  '傍晚':  { color: 'text-rose-300',    bg: 'bg-rose-950/30',    icon: 'EVE' },
-  '晚上':  { color: 'text-indigo-300',  bg: 'bg-indigo-950/30',  icon: 'NITE' },
-  '任意':  { color: 'text-gray-300',    bg: 'bg-gray-800/40',    icon: 'ANY' },
+  '早上':  { color: 'text-warn',        bg: 'bg-warn-soft/60',     icon: 'AM' },
+  '中午':  { color: 'text-[#B06A2C]',   bg: 'bg-[#C07840]/12',     icon: 'NOON' },
+  '下午':  { color: 'text-[#3E6E97]',   bg: 'bg-[#3E6E97]/10',     icon: 'PM' },
+  '傍晚':  { color: 'text-danger',      bg: 'bg-danger-soft/60',   icon: 'EVE' },
+  '晚上':  { color: 'text-accent',      bg: 'bg-accent-soft/60',   icon: 'NITE' },
+  '任意':  { color: 'text-ink-soft',    bg: 'bg-panel-soft/50',    icon: 'ANY' },
 }
 
 /**
@@ -30,15 +30,15 @@ export default function TodayCard({
         <button
           onClick={onGenerate}
           disabled={generating}
-          className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-gray-800/40 transition-colors rounded-xl disabled:opacity-60 bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto"
+          className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-panel-soft/40 transition-colors rounded-xl disabled:opacity-60 bg-panel/95 border border-line rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto"
         >
           <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wider">今日聚焦</div>
-            <div className="text-sm text-gray-300 mt-0.5">
+            <div className="text-xs text-ink-faint uppercase tracking-wider">今日聚焦</div>
+            <div className="text-sm text-ink-soft mt-0.5">
               {generating ? '思考中…' : '点击让 AI 生成今天最该做的 3 件事'}
             </div>
           </div>
-          {!generating && <span className="text-xs text-blue-300">↻ 生成</span>}
+          {!generating && <span className="text-xs text-accent">↻ 生成</span>}
         </button>
       </div>
     )
@@ -50,17 +50,17 @@ export default function TodayCard({
 
   return (
     <div className="absolute top-3 left-3 right-3 z-10 max-w-2xl mx-auto pointer-events-none">
-      <div className="bg-gray-900/95 border border-gray-800 rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto">
+      <div className="bg-panel/95 border border-line rounded-xl shadow-lg backdrop-blur-sm pointer-events-auto">
       {/* Header */}
-      <div className="px-4 py-2 flex items-center justify-between border-b border-gray-800">
+      <div className="px-4 py-2 flex items-center justify-between border-b border-line">
         <button onClick={() => setCollapsed(c => !c)} className="flex items-center gap-2 text-left flex-1">
-          <span className="text-xs text-gray-500">{collapsed ? '▸' : '▾'}</span>
-          <span className="text-xs text-gray-400 uppercase tracking-wider">今日聚焦</span>
-          <span className="text-xs text-emerald-400 font-mono">
+          <span className="text-xs text-ink-faint">{collapsed ? '▸' : '▾'}</span>
+          <span className="text-xs text-ink-faint uppercase tracking-wider">今日聚焦</span>
+          <span className="text-xs text-accent font-mono">
             {doneCount}/{total}
           </span>
           {focus.summary && !collapsed && (
-            <span className="text-xs text-gray-500 truncate ml-2">· {focus.summary}</span>
+            <span className="text-xs text-ink-faint truncate ml-2">· {focus.summary}</span>
           )}
         </button>
         <div className="flex items-center gap-2 ml-2">
@@ -68,14 +68,14 @@ export default function TodayCard({
             onClick={onGenerate}
             disabled={generating}
             title="重新生成"
-            className="text-[11px] text-gray-500 hover:text-gray-300 disabled:opacity-50"
+            className="text-[11px] text-ink-faint hover:text-ink-soft disabled:opacity-50"
           >
             {generating ? '…' : '↻ 重生成'}
           </button>
           <button
             onClick={onDismiss}
             title="清空今天的聚焦"
-            className="text-[11px] text-gray-600 hover:text-rose-400"
+            className="text-[11px] text-ink-ghost hover:text-danger"
           >
             清空
           </button>
@@ -86,7 +86,7 @@ export default function TodayCard({
       {!collapsed && (
         <div className="px-3 py-2 space-y-1.5">
           {tasks.length === 0 && (
-            <div className="text-xs text-gray-500 py-2 text-center">没有任务，可以重新生成</div>
+            <div className="text-xs text-ink-faint py-2 text-center">没有任务，可以重新生成</div>
           )}
           {tasks.map((t, i) => {
             const tier = TIER_STYLES[t.energy_tier] || TIER_STYLES['任意']
@@ -102,8 +102,8 @@ export default function TodayCard({
                   onClick={() => onToggle(i)}
                   className="flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors"
                   style={{
-                    borderColor: t.done ? '#10b981' : '#4b5563',
-                    background: t.done ? '#10b981' : 'transparent',
+                    borderColor: t.done ? '#4A8C5C' : '#CBC0A4',
+                    background: t.done ? '#4A8C5C' : 'transparent',
                   }}
                 >
                   {t.done && <span className="text-white text-[10px] leading-none">✓</span>}
@@ -114,23 +114,23 @@ export default function TodayCard({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs">{tier.icon}</span>
                     <span className={`text-xs ${tier.color}`}>{t.energy_tier}</span>
-                    <span className={`text-sm font-medium ${t.done ? 'line-through text-gray-500' : 'text-gray-200'}`}>
+                    <span className={`text-sm font-medium ${t.done ? 'line-through text-ink-faint' : 'text-ink'}`}>
                       {t.name}
                     </span>
                     {t.node_id && !t.done && (
-                      <span className="text-[10px] text-blue-400 bg-blue-900/40 px-1 rounded">已在树</span>
+                      <span className="text-[10px] text-accent bg-accent-soft px-1 rounded">已在树</span>
                     )}
                     {!t.node_id && (
-                      <span className="text-[10px] text-gray-500 bg-gray-800 px-1 rounded">建议</span>
+                      <span className="text-[10px] text-ink-faint bg-panel-soft px-1 rounded">建议</span>
                     )}
                   </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">{t.why}</div>
+                  <div className="text-[11px] text-ink-faint mt-0.5 leading-relaxed">{t.why}</div>
                 </div>
 
                 {/* 删除 */}
                 <button
                   onClick={() => onRemove(i)}
-                  className="opacity-0 group-hover:opacity-100 text-[11px] text-gray-600 hover:text-rose-400 transition-opacity flex-shrink-0"
+                  className="opacity-0 group-hover:opacity-100 text-[11px] text-ink-ghost hover:text-danger transition-opacity flex-shrink-0"
                   title="移除这条"
                 >
                   ✕

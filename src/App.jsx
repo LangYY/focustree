@@ -307,16 +307,16 @@ export default function App() {
   // ── 渲染 ────────────────────────────────────────────
   if (authLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', color: '#6b7280' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--color-surface)', color: 'var(--color-ink-faint)' }}>
         <div>载入中…</div>
         {authSlow && (
-          <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', lineHeight: 1.7, maxWidth: 360 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-ink-soft)', textAlign: 'center', lineHeight: 1.7, maxWidth: 360 }}>
             连接数据库较慢。可能原因：<br />
             · Supabase 免费项目闲置后被暂停（去 Dashboard 点 Restore）<br />
             · 网络代理拦截了 supabase.co<br />
             <button
               onClick={() => window.location.reload()}
-              style={{ marginTop: 8, padding: '4px 14px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#93c5fd', cursor: 'pointer' }}
+              style={{ marginTop: 8, padding: '4px 14px', borderRadius: 8, border: '1px solid var(--color-line-strong)', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer' }}
             >
               重试
             </button>
@@ -329,7 +329,7 @@ export default function App() {
   if (!user) return <AuthPage />
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f1117' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--color-surface)' }}>
       <Toolbar
         density={density}
         onDensityChange={setDensity}
@@ -358,17 +358,17 @@ export default function App() {
         {/* 主区域：树 or 末端视图 */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           {treeLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-ink-faint)' }}>
               加载中…
             </div>
           ) : !treeData ? (
             <div style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              height: '100%', gap: '16px', color: '#6b7280', userSelect: 'none',
+              height: '100%', gap: '16px', color: 'var(--color-ink-faint)', userSelect: 'none',
             }}>
-              <div style={{ fontSize: '48px', opacity: 0.3 }}>🌱</div>
-              <div style={{ fontSize: '16px', color: '#9ca3af' }}>树是空的</div>
-              <div style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', lineHeight: 1.6 }}>
+              <div style={{ fontSize: '48px', opacity: 0.5 }}>🌱</div>
+              <div style={{ fontSize: '16px', color: 'var(--color-ink-soft)', fontFamily: 'var(--font-display)' }}>树是空的</div>
+              <div style={{ fontSize: '13px', color: 'var(--color-ink-faint)', textAlign: 'center', lineHeight: 1.6 }}>
                 在右侧告诉 AI 你想做什么<br />
                 树里有节点后，也可以从末端枝干拉出虚线继续增加
               </div>
