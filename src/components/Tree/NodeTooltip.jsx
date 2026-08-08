@@ -1,7 +1,12 @@
 import { PRIORITY_LABELS, getNodeDueState } from '../../lib/treeUtils'
 
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
 const STATUS_LABEL = { active: '进行中', done: '已完成', dormant: '暂停中' }
+
+function statusColor(status) {
+  if (status === 'done') return 'var(--ft-accent)'
+  if (status === 'dormant') return 'var(--ft-warn)'
+  return 'var(--ft-accent)'
+}
 
 export default function NodeTooltip({ x, y, node }) {
   if (!node) return null
@@ -36,7 +41,7 @@ export default function NodeTooltip({ x, y, node }) {
             display: 'inline-block',
             width: 6, height: 6,
             borderRadius: '50%',
-            background: STATUS_COLOR[node.status] || '#6b7280',
+            background: statusColor(node.status),
           }}
         />
         <span className="text-gray-400">{STATUS_LABEL[node.status] || node.status}</span>

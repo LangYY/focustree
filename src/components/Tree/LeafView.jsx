@@ -1,8 +1,6 @@
 import { useMemo } from 'react'
 import { getDerivedWeightMeta, getDerivedWeightMetaMap, getNodeDueState, PRIORITY_LABELS } from '../../lib/treeUtils'
 
-const STATUS_COLOR = { active: '#3b82f6', done: '#22c55e', dormant: '#eab308' }
-
 function safePercent(value) {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric * 100)) : 0
@@ -29,7 +27,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
       const pColor = node.type === 'project' ? node.color : projectColor
       node.children?.forEach(c => collect(c, pName, pColor))
     }
-    if (treeData) collect(treeData, '', '#6b7280')
+    if (treeData) collect(treeData, '', 'var(--ft-text-tertiary)')
     return result.sort((a, b) => (b.directPriority || 0) - (a.directPriority || 0))
   }, [treeData, userGoal])
 
@@ -38,7 +36,7 @@ export default function LeafView({ treeData, userGoal, onStatusChange }) {
   const done    = tasks.filter(t => t.status === 'done')
 
   return (
-    <div className="h-full overflow-y-auto p-6" style={{ background: '#0f1117' }}>
+    <div className="h-full overflow-y-auto p-6" style={{ background: 'var(--ft-canvas)' }}>
       <div className="max-w-2xl mx-auto">
         <h2 className="text-lg font-semibold text-gray-200 mb-1">末端视图</h2>
         <p className="text-sm text-gray-500 mb-6">所有任务，按推荐分排序</p>
@@ -83,8 +81,8 @@ function TaskRow({ task, onStatusChange, dimmed }) {
         onClick={() => onStatusChange(task.id, task.status === 'done' ? 'active' : 'done')}
         className="flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors"
         style={{
-          borderColor: task.status === 'done' ? '#22c55e' : '#374151',
-          background:  task.status === 'done' ? '#22c55e' : 'transparent',
+          borderColor: task.status === 'done' ? 'var(--ft-accent)' : 'var(--ft-border-strong)',
+          background:  task.status === 'done' ? 'var(--ft-accent)' : 'transparent',
         }}
       >
         {task.status === 'done' && <span className="text-white text-xs">✓</span>}
@@ -125,7 +123,7 @@ function TaskRow({ task, onStatusChange, dimmed }) {
             className="h-full rounded-full"
             style={{
               width: `${safePercent((task.directPriority || 0) / 100)}%`,
-              background: STATUS_COLOR[task.status] || '#6b7280',
+              background: task.status === 'done' ? 'var(--ft-accent)' : task.status === 'dormant' ? 'var(--ft-warn)' : 'var(--ft-accent)',
             }}
           />
         </div>

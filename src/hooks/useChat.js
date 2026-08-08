@@ -5,6 +5,7 @@ import { getClientTime } from '../lib/clientTime'
 import { classifyIntent } from '../lib/intentClassifier'
 import { routeLocalQuery } from '../lib/agentRouter'
 import { collectPriorityAnalysisNodes } from '../lib/priorityAnalysis'
+import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
 
 const WELCOME = {
   id: 'welcome',
@@ -1088,7 +1089,7 @@ async function executeAction(action, treeActions) {
       }
       case 'add_project': {
         const newId = await treeActions.addNode({
-          name: action.name, type: 'project', color: action.color || '#4A8C5C',
+          name: action.name, type: 'project', color: action.color || DEFAULT_PROJECT_COLOR,
           annotations: action.annotations,
         })
         return { log: `已创建项目「${action.name}」`, newId }

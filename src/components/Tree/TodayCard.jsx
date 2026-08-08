@@ -102,8 +102,8 @@ export default function TodayCard({
                   onClick={() => onToggle(i)}
                   className="flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors"
                   style={{
-                    borderColor: t.done ? '#10b981' : '#4b5563',
-                    background: t.done ? '#10b981' : 'transparent',
+                    borderColor: t.done ? 'var(--ft-accent)' : 'var(--ft-border-strong)',
+                    background: t.done ? 'var(--ft-accent)' : 'transparent',
                   }}
                 >
                   {t.done && <span className="text-white text-[10px] leading-none">✓</span>}

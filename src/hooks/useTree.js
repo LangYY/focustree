@@ -12,6 +12,7 @@ import {
   SAMPLE_DATA,
 } from '../lib/treeUtils'
 import { getGoalVersion, nodePriorityFingerprint, PRIORITY_RELATION_TYPES } from '../lib/priorityEngine'
+import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
 
 const MAX_HISTORY = 30
 
@@ -1002,7 +1003,7 @@ async function seedSampleData(userId) {
 
   // 新用户只创建一个示例项目作为引导，保持界面干净
   const { data: projects } = await supabase.from('nodes').insert([
-    { user_id: userId, name: '我的第一个项目', type: 'project', color: '#4A8C5C', weight: 1.0, status: 'active', position: 1, expanded: true, last_active_at: now },
+    { user_id: userId, name: '我的第一个项目', type: 'project', color: DEFAULT_PROJECT_COLOR, weight: 1.0, status: 'active', position: 1, expanded: true, last_active_at: now },
   ]).select('id')
 
   if (!projects?.[0]) return

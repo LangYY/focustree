@@ -34,7 +34,7 @@ export default function ChatHistoryPanel({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.7)' }}
+      style={{ background: 'var(--ft-overlay-scrim)' }}
       onClick={onClose}
     >
       <div

@@ -81,7 +81,7 @@ function formatLocalRoute(route) {
 /**
  * 把回复内容里的 [OK]/[目标]/[-] 及旧版 emoji 行渲染成 badge；任务名「xxx」做成可悬浮高亮
  */
-function MessageContent({ content, nameToId, onHoverNode }) {
+function MessageContent({ content, nameToId, onHoverNode, onSelectNode }) {
   const lines = content.split('\n')
 
   function renderLine(line, i, classNameWrap) {
@@ -94,6 +94,7 @@ function MessageContent({ content, nameToId, onHoverNode }) {
           key={idx}
           onMouseEnter={() => linked && onHoverNode?.(seg.nodeId)}
           onMouseLeave={() => linked && onHoverNode?.(null)}
+          onClick={() => linked && onSelectNode?.(seg.nodeId)}
           className={linked
             ? 'cursor-pointer underline decoration-dotted decoration-blue-400/50 underline-offset-2 hover:text-blue-300 hover:decoration-blue-300 transition-colors'
             : ''
@@ -110,13 +111,13 @@ function MessageContent({ content, nameToId, onHoverNode }) {
     <div className="whitespace-pre-wrap">
       {lines.map((line, i) => {
         if (line.startsWith('[OK]') || line.startsWith('✅')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-green-400 bg-green-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'ft-message-status ft-status-ok')
         }
         if (line.startsWith('[目标]') || line.startsWith('🎯')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-emerald-300 bg-emerald-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'ft-message-status ft-status-goal')
         }
         if (line.startsWith('[-]') || line.startsWith('⚠️')) {
-          return renderLine(line, i, 'mt-1.5 text-xs text-amber-300 bg-amber-900/30 rounded-lg px-2 py-1')
+          return renderLine(line, i, 'ft-message-status ft-status-warn')
         }
         return renderLine(line, i, '')
       })}
@@ -405,39 +406,6 @@ function Row({ label, value, valueColor = 'text-gray-300', emphasis, multi }) {
   )
 }
 
-/**
- * 顶部目标横幅
- */
-function GoalBanner({ goalText, goalExpired, onEdit, onClear }) {
-  if (!goalText) {
-    return (
-      <div
-        onClick={onEdit}
-        className="cursor-pointer px-3 py-2 bg-gray-800/40 border-b border-gray-800 hover:bg-gray-800/70 transition-colors"
-      >
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider">当前阶段目标</div>
-        <div className="text-xs text-gray-500 mt-0.5">
-          点击设置 · 或输入 <code className="text-gray-400">/目标 ...</code>
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div className="px-3 py-2 bg-emerald-950/40 border-b border-emerald-900/40 group">
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] text-emerald-500 uppercase tracking-wider">
-          当前阶段目标 {goalExpired && <span className="text-amber-400">· 已过期</span>}
-        </div>
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-          <button onClick={onEdit}  className="text-[10px] text-gray-400 hover:text-gray-200">改</button>
-          <button onClick={onClear} className="text-[10px] text-gray-400 hover:text-gray-200">清</button>
-        </div>
-      </div>
-      <div className="text-xs text-emerald-200 mt-0.5 leading-relaxed">{goalText}</div>
-    </div>
-  )
-}
-
 const MODEL_OPTIONS = [
   { value: 'auto',     label: '自动',  hint: '质量优先：复杂梳理/规划用深度，短操作用快速' },
   { value: 'chat',     label: '快速',  hint: 'DeepSeek V4-flash · 便宜快' },
@@ -446,12 +414,12 @@ const MODEL_OPTIONS = [
 
 export default function ChatPanel({
   messages, isLoading, onSend, isOpen,
-  goalText, goalExpired, onClearGoal,
+  onClearGoal,
   model, onModelChange,
   onResetConversation,
   onOpenHistory, onOpenLearned, onOpenRecommendations,
   hitRate,
-  treeData, onHoverNode,
+  treeData, onHoverNode, onSelectNode,
   onTriggerReview, reviewGenerating,
   onRetry,
   onCancel, onApplyDraftPlan, onApplyPriorityAnalysis, pendingCount,
@@ -472,6 +440,20 @@ export default function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  useEffect(() => {
+    const prefill = event => {
+      setInput(String(event.detail || ''))
+      window.setTimeout(() => textareaRef.current?.focus(), 0)
+    }
+    const focus = () => textareaRef.current?.focus()
+    window.addEventListener('ft-prefill-chat', prefill)
+    window.addEventListener('ft-focus-chat', focus)
+    return () => {
+      window.removeEventListener('ft-prefill-chat', prefill)
+      window.removeEventListener('ft-focus-chat', focus)
+    }
+  }, [])
 
   /**
    * 解析 slash command。返回 true 表示已被命令拦截，不走 AI。
@@ -523,28 +505,14 @@ export default function ChatPanel({
     }
   }
 
-  /**
-   * 编辑目标的弹窗式交互（先用 prompt 简化实现，后面再做精致的 modal）
-   */
-  function handleEditGoal() {
-    const next = window.prompt(
-      '设置当前阶段目标（例如：Q2 月入 15k，启动 B 站频道）：',
-      goalText || ''
-    )
-    if (next === null) return        // 取消
-    const trimmed = next.trim()
-    if (!trimmed) { onClearGoal?.(); return }
-    onSend(`请把我的当前目标设为：${trimmed}。先拆解目标和相关节点优先级，等我确认后再应用。`)
-  }
-
   return (
     <div
-      className="flex flex-col h-full bg-gray-900 border-l border-gray-800"
+      className="ft-chat-panel flex flex-col h-full"
       style={{
-        width: isOpen ? 320 : 0,
-        minWidth: isOpen ? 320 : 0,
+        width: isOpen ? '100%' : 0,
+        minWidth: isOpen ? 0 : 0,
         overflow: 'hidden',
-        transition: 'width 0.25s ease, min-width 0.25s ease',
+        transition: 'opacity var(--ft-dur-2) var(--ft-ease-out)',
       }}
     >
       {/* Header */}
@@ -617,22 +585,14 @@ export default function ChatPanel({
         </div>
       </div>
 
-      {/* Goal banner */}
-      <GoalBanner
-        goalText={goalText}
-        goalExpired={goalExpired}
-        onEdit={handleEditGoal}
-        onClear={onClearGoal}
-      />
-
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
+      <div className="ft-chat-messages flex-1 overflow-y-auto px-3 py-4 space-y-3">
         {messages.map(msg => {
           // 周末回顾：特殊样式（更宽、不同背景）
           if (msg.kind === 'weekly_review') {
             return (
-              <div key={msg.id} className="flex justify-start">
-                <div className="max-w-[95%] w-full bg-gradient-to-br from-indigo-950/60 to-gray-900 border border-indigo-800/40 rounded-2xl px-3 py-3 text-sm leading-relaxed">
+              <div key={msg.id} className="ft-chat-message is-review flex justify-start">
+                <div className="ft-message-body max-w-[95%] w-full">
                   <div className="text-[10px] text-indigo-400 uppercase tracking-wider mb-1.5">
                     本周回顾
                   </div>
@@ -640,27 +600,25 @@ export default function ChatPanel({
                     content={msg.content}
                     nameToId={nameToId}
                     onHoverNode={onHoverNode}
+                    onSelectNode={onSelectNode}
                   />
                 </div>
               </div>
             )
           }
           return (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
               <div
-                className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-sm'
-                    : 'bg-gray-800 text-gray-200 rounded-bl-sm'
-                }`}
+                key={msg.id}
+                className={`ft-chat-message flex ${msg.role === 'user' ? 'is-user justify-end' : 'is-ai justify-start'}`}
+              >
+                <div
+                className="ft-message-body max-w-[85%] px-3 py-2 text-sm leading-relaxed"
               >
                 <MessageContent
                   content={msg.content}
                   nameToId={nameToId}
                   onHoverNode={onHoverNode}
+                  onSelectNode={onSelectNode}
                 />
                 {msg.role === 'assistant' && msg.thinking && (
                   <DraftPlanCard
@@ -716,8 +674,9 @@ export default function ChatPanel({
 
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 text-gray-400 px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
-              <span className="animate-pulse">...</span>
+            <div className="ft-chat-waiting">
+              <span className="ft-chat-wait-line" />
+              <span className="ft-mono">等待中</span>
               {pendingCount > 0 && (
                 <span className="ml-2 text-amber-400 text-[11px]">
                   还有 {pendingCount} 条消息等待处理
@@ -730,7 +689,7 @@ export default function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0 px-3 pb-4 pt-2 border-t border-gray-800">
+      <div className="ft-chat-input-wrap flex-shrink-0 px-3 pb-4 pt-2">
         <div className="flex gap-2 items-end">
           <textarea
             ref={textareaRef}
@@ -744,17 +703,17 @@ export default function ChatPanel({
             onKeyDown={handleKeyDown}
             placeholder="说点什么…（试试 /目标 设置当前阶段目标）"
             rows={2}
-            className="flex-1 bg-gray-800 text-gray-200 placeholder-gray-500 text-sm px-3 py-2 rounded-xl resize-vertical outline-none focus:ring-1 focus:ring-blue-500"
+            className="ft-chat-input flex-1 text-sm px-3 py-2 resize-vertical"
             style={{ maxHeight: 200, minHeight: 44 }}
           />
           {isLoading ? (
             <button
               onClick={() => onCancel?.()}
-              className="flex-shrink-0 bg-red-600 hover:bg-red-500 text-white text-sm px-3 py-2 rounded-xl transition-colors relative"
+              className="ft-chat-cancel flex-shrink-0 text-sm px-3 py-2 relative"
             >
               停止
               {pendingCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
+                <span className="ft-chat-queue-badge absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
                   {pendingCount}
                 </span>
               )}
@@ -763,7 +722,7 @@ export default function ChatPanel({
             <button
               onClick={handleSend}
               disabled={!input.trim()}
-              className="flex-shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-3 py-2 rounded-xl transition-colors"
+              className="ft-chat-send flex-shrink-0 text-sm px-3 py-2"
             >
               发送
             </button>

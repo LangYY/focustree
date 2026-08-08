@@ -1,4 +1,5 @@
 import { computePriorityMetaMap, getPriorityMeta } from './priorityEngine.js'
+import { DEFAULT_PROJECT_COLOR } from './branchPalette.js'
 
 /**
  * 把 Supabase 返回的 flat nodes 数组转成 D3 需要的树结构
@@ -51,7 +52,7 @@ export const SAMPLE_DATA = {
   children: [
     {
       id: 'p1', type: 'project', name: '我的第一个项目',
-      color: '#4A8C5C', weight: 1.0, status: 'active',
+      color: DEFAULT_PROJECT_COLOR, weight: 1.0, status: 'active',
       expanded: true,
       children: [
         { id: 't1', type: 'task', name: '点击右键可以添加子任务', status: 'active', weight: 0.8 },
@@ -59,6 +60,10 @@ export const SAMPLE_DATA = {
       ]
     },
   ]
+}
+
+export function getPriorityLinkStrokeWidth(priority) {
+  return Math.min(14, Math.max(2, 2 + Number(priority || 0) * 0.12))
 }
 
 /**
@@ -122,12 +127,6 @@ export function sortByParentFirst(nodes) {
   return [...sorted, ...remaining] // 保险：剩余的附在末尾
 }
 
-export function getNodeRadius(type) {
-  if (type === 'project') return 18
-  if (type === 'category') return 11
-  return 6
-}
-
 export const PRIORITY_OPTIONS = [
   { value: null, label: '未设定' },
   { value: 'low', label: '低' },
@@ -174,26 +173,6 @@ export function getNodeDueState(node, now = new Date()) {
 
 export function isUrgentPriority(value) {
   return normalizeCurrentPriority(value) === 'urgent'
-}
-
-export function getNodeColor(node) {
-  if (node.status === 'done') return '#22c55e'
-  if (node.status === 'dormant') return '#eab308'
-  if (node.type === 'project') return node.color || '#6b7280'
-  if (node.type === 'category') return '#9ca3af'
-  return '#d1d5db'
-}
-
-export function getLinkStrokeWidth(flow = 1) {
-  const numeric = Number.isFinite(Number(flow)) ? Number(flow) : 1
-  const clampedFlow = Math.max(0.01, Math.min(1, numeric))
-  return 2 + Math.sqrt(clampedFlow) * 9
-}
-
-export function getPriorityLinkStrokeWidth(priority = 0) {
-  const numeric = Number.isFinite(Number(priority)) ? Number(priority) : 0
-  const normalized = Math.max(0, Math.min(100, numeric)) / 100
-  return 2 + Math.pow(normalized, 1.35) * 12
 }
 
 function normalizedWeight(value) {

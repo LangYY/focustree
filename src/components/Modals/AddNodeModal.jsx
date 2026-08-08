@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { BRANCH_PALETTE } from '../../lib/branchPalette'
 
-const PROJECT_COLORS = [
-  '#4A8C5C', '#7B6FE8', '#C07840', '#4A7CB5',
-  '#B54A7C', '#7CB54A', '#B5A44A', '#4AB5B0',
-]
+const PROJECT_COLORS = BRANCH_PALETTE.dark
 
 export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClose }) {
   const [name, setName]   = useState('')
@@ -37,7 +35,7 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
   return (
     <div
       className="fixed inset-0 flex items-center justify-center z-50"
-      style={{ background: 'rgba(0,0,0,0.6)' }}
+      style={{ background: 'var(--ft-overlay-scrim)' }}
       onClick={onClose}
     >
       <div

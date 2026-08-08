@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
 import {
-  getNodeRadius,
-  getPriorityLinkStrokeWidth,
   findNodeById,
   getDerivedWeightMetaMap,
   getDerivedWeightMeta,
   getNodeDueState,
   isUrgentPriority,
 } from '../../lib/treeUtils'
+import { resolveBranchBaseColor, shadeBranchColor } from '../../lib/branchPalette'
+import { branchPath, centerLinePath } from './render/branchPath'
+import { branchWidth, glowMetrics, nodeAriaLabel, nodeRadius } from './render/nodeVisual'
+import { ringValues } from './render/growthRings'
+import { dueArcPath, dueColor } from './render/dueArc'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
+import CanvasControls from './CanvasControls'
 
 const MARGIN = { top: 20, right: 120, bottom: 20, left: 60 }
 const NODE_H_GAP = 220
@@ -18,7 +22,7 @@ const NODE_V_GAP = 48
 const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
-const NODE_HIT_PADDING = 6
+const NODE_HIT_PADDING = 8
 const TERMINAL_BRANCH_HIT_WIDTH = 18
 const ADD_CHILD_DRAG_MIN_X = 28
 const DROP_MOVE_BAND_MIN = 10
@@ -26,22 +30,11 @@ const MIDDLE_MOUSE_BUTTON = 1
 const ZOOM_MIN = 0.15
 const ZOOM_MAX = 3
 const ZOOM_BUTTON_FACTOR = 1.15
-const DEFAULT_PROJECT_COLOR = '#4A8C5C'
-const BRANCH_PALETTE = [
-  '#ef4444',
-  '#8b5cf6',
-  '#f97316',
-  '#0ea5e9',
-  '#22c55e',
-  '#eab308',
-  '#ec4899',
-  '#14b8a6',
-  '#64748b',
-]
-
-function shouldShowLabel(node, density) {
+function shouldShowLabel(node, density, zoomScale = 1) {
   const data = node?.data || node
   if (data?.type === 'root') return false
+  if (zoomScale < 0.5) return data?.type === 'project'
+  if (zoomScale > 1.4) return true
   if (density === 'dense') return true
   if (density === 'medium') return data?.type !== 'task'
   return data?.type === 'project'
@@ -88,50 +81,18 @@ function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, numeric))
 }
 
-function isDefaultProjectColor(color) {
-  return String(color || '').trim().toLowerCase() === DEFAULT_PROJECT_COLOR.toLowerCase()
-}
-
-function resolveBranchBaseColor(hNode, index) {
-  const stored = String(hNode?.data?.color || '').trim()
-  if (stored && !isDefaultProjectColor(stored)) return stored
-  return BRANCH_PALETTE[index % BRANCH_PALETTE.length]
-}
-
-function shadeBranchColor(baseColor, depth, status) {
-  const color = d3.hsl(baseColor || '#64748b')
-  const fallback = d3.hsl('#64748b')
-  const hue = Number.isFinite(color.h) ? color.h : fallback.h
-  const sourceSaturation = Number.isFinite(color.s) ? color.s : fallback.s
-  const sourceLightness = Number.isFinite(color.l) ? color.l : fallback.l
-  const depthStep = Math.min(depth, 5)
-  const saturation = clampNumber(sourceSaturation * (0.95 - depthStep * 0.035), 0.42, 0.9)
-  let lightness = clampNumber(sourceLightness + depthStep * 0.055, 0.44, 0.76)
-  let nextSaturation = saturation
-
-  if (status === 'done') {
-    nextSaturation *= 0.42
-    lightness = clampNumber(lightness * 0.9, 0.34, 0.66)
-  } else if (status === 'dormant') {
-    nextSaturation *= 0.32
-    lightness = clampNumber(lightness * 0.82, 0.32, 0.58)
-  }
-
-  return d3.hsl(hue, nextSaturation, lightness).formatHex()
-}
-
 function isVisibleDueState(dueState) {
   return dueState && ['overdue', 'today', 'three_days', 'week'].includes(dueState.state)
 }
 
-function assignBranchVisuals(root) {
+function assignBranchVisuals(root, theme) {
   const rootBranches = root.children || []
 
   function walk(node, baseColor, branchDepth) {
     const dueState = getNodeDueState(node.data)
     node.__branchBaseColor = baseColor
     node.__branchDepth = branchDepth
-    node.__displayColor = shadeBranchColor(baseColor, branchDepth, node.data.status)
+    node.__displayColor = shadeBranchColor(baseColor, branchDepth, node.data.status, theme)
     node.__visualOpacity = node.data.status === 'done' ? 0.58 : node.data.status === 'dormant' ? 0.46 : 1
     node.__dueState = dueState
     node.__dueVisible = isVisibleDueState(dueState)
@@ -140,7 +101,7 @@ function assignBranchVisuals(root) {
   }
 
   rootBranches.forEach((branch, index) => {
-    walk(branch, resolveBranchBaseColor(branch, index), 0)
+    walk(branch, resolveBranchBaseColor(branch, index, theme), 0)
   })
 }
 
@@ -157,6 +118,12 @@ function assignCumulativeFlow(root, userGoal) {
     node.__prioritySignals = meta?.signalBreakdown ?? []
   })
 }
+function getNodeRadius(value, directPriority) {
+  const data = value?.data || value
+  const type = typeof data === 'string' ? data : data?.type
+  const priority = directPriority ?? value?.__directPriority ?? data?.__directPriority ?? 50
+  return nodeRadius(type, priority)
+}
 
 function linkStrokeWidth(d) {
   const target = d?.target
@@ -165,7 +132,7 @@ function linkStrokeWidth(d) {
   else if (target?.data?.current_priority === 'high') extra += 0.7
   if (target?.__dueState?.state === 'overdue' || target?.__dueState?.state === 'today') extra += 0.8
   else if (target?.__dueState?.state === 'three_days') extra += 0.45
-  return getPriorityLinkStrokeWidth(target?.__branchPriority) + extra
+  return branchWidth(target?.__branchPriority) + extra
 }
 
 function applyLinkStrokeWidth(selection, extra = 0) {
@@ -181,9 +148,9 @@ function linkOpacity(d) {
 }
 
 function nodeStrokeColor(d) {
-  if (d?.__isUrgent) return 'rgba(248,250,252,0.84)'
-  if (d?.data?.current_priority === 'high') return 'rgba(248,250,252,0.52)'
-  return '#1f2937'
+  if (d?.__isUrgent) return 'var(--ft-text-primary)'
+  if (d?.data?.current_priority === 'high') return 'var(--ft-text-secondary)'
+  return 'var(--ft-border-strong)'
 }
 
 function nodeStrokeWidth(d) {
@@ -193,26 +160,13 @@ function nodeStrokeWidth(d) {
 }
 
 function nodeFilter(d) {
-  if (d?.__isUrgent) return 'drop-shadow(0 0 7px rgba(248,250,252,0.45))'
+  if (d?.__isUrgent) return 'url(#ft-glow)'
   return null
 }
 
-function dueMarkerLabel(dueState) {
-  if (!dueState) return ''
-  if (dueState.state === 'overdue') return '逾'
-  if (dueState.state === 'today') return '今'
-  if (dueState.days > 0) return `${dueState.days}天`
-  return ''
-}
-
-function dueMarkerColors(dueState) {
-  if (dueState?.state === 'overdue') {
-    return { stroke: '#f87171', fill: 'rgba(127,29,29,0.28)', text: '#fecaca' }
-  }
-  if (dueState?.state === 'today' || dueState?.state === 'three_days') {
-    return { stroke: '#fbbf24', fill: 'rgba(120,53,15,0.28)', text: '#fde68a' }
-  }
-  return { stroke: '#f59e0b', fill: 'rgba(120,53,15,0.16)', text: '#fcd34d' }
+function truncateLabel(value) {
+  const text = String(value || '')
+  return text.length > 22 ? `${text.slice(0, 22)}…` : text
 }
 
 function withDerivedWeightMeta(hNode) {
@@ -234,7 +188,7 @@ function isTypingTarget(element) {
   return tag === 'input' || tag === 'textarea' || tag === 'select' || element?.isContentEditable
 }
 
-export default function TreeView({ treeData, userGoal, density, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode, priorityCalculationVersion }) {
+export default function TreeView({ treeData, theme = 'dark', userGoal, density, onDensityChange, onExpandAll, onCollapseAll, onNodeSelect, onNodeToggle, onContextAction, resetZoomRef, highlightedNodeId, onLeafAdd, onDropBranch, onRenameNode, priorityCalculationVersion, layers, onLayerChange }) {
   const svgRef  = useRef(null)
   const gRef    = useRef(null)
   const zoomRef = useRef(null)
@@ -248,6 +202,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   const [tooltip, setTooltip]         = useState(null)  // { x, y, node }
   const [editingNode, setEditingNode] = useState(null)  // { id, name, left, top, width }
   const [zoomScale, setZoomScale] = useState(1)
+  const [controlsOpen, setControlsOpen] = useState(false)
   const dragRef      = useRef({})  // { node, startX, startY, dragging, sourceEl, pointerId }
   const suppressClickRef = useRef(false)
   const addDisabledRef = useRef(false)
@@ -284,7 +239,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const nodeEl = gRef.current?.querySelector(`.node[data-node-id="${nodeData.id}"]`)
     const labelEl = nodeEl?.querySelector?.('.node-label')
     const rect = labelEl?.getBoundingClientRect?.() || nodeEl?.getBoundingClientRect?.()
-    const radius = getNodeRadius(nodeData.type)
+    const radius = getNodeRadius(nodeData)
     const left = rect
       ? (labelEl ? rect.left - 4 : rect.left + radius + 8)
       : (event?.clientX || 80)
@@ -375,12 +330,12 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     const root = d3.hierarchy(treeData, d => d.expanded === false ? null : d.children)
     assignCumulativeFlow(root, userGoal)
-    assignBranchVisuals(root)
+    assignBranchVisuals(root, theme)
     const treeLayout = d3.tree()
       .nodeSize([NODE_V_GAP, NODE_H_GAP])
       .separation((a, b) => {
-        const aR = getNodeRadius(a.data.type)
-        const bR = getNodeRadius(b.data.type)
+        const aR = getNodeRadius(a.data, a.__directPriority)
+        const bR = getNodeRadius(b.data, b.__directPriority)
         return (aR + bR) / NODE_V_GAP + 0.5
       })
     treeLayout(root)
@@ -396,7 +351,13 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const g = d3.select(gRef.current)
     g.selectAll('*').remove()
 
-    // 链接线
+    const svg = d3.select(svgRef.current)
+    svg.selectAll('defs.ft-tree-defs').remove()
+    const defs = svg.insert('defs', ':first-child').attr('class', 'ft-tree-defs')
+    const glow = defs.append('filter').attr('id', 'ft-glow').attr('x', '-80%').attr('y', '-80%').attr('width', '260%').attr('height', '260%')
+    glow.append('feGaussianBlur').attr('stdDeviation', 3.5)
+
+    // 锥形枝干：branchPriority 只通过枝干物理宽度表达。
     g.selectAll('.link')
       .data(links)
       .join('path')
@@ -405,13 +366,21 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('data-direct-priority', d => Number.isFinite(d.target.__directPriority) ? d.target.__directPriority.toFixed(1) : '')
       .attr('data-branch-priority', d => Number.isFinite(d.target.__branchPriority) ? d.target.__branchPriority.toFixed(1) : '')
       .attr('data-cultivation', d => Number.isFinite(d.target.__cultivationScore) ? d.target.__cultivationScore.toFixed(1) : '')
-      .attr('data-completeness', d => Number.isFinite(d.target.__completeness) ? d.target.__completeness.toFixed(2) : '')
-      .attr('data-goal-fit', d => Number.isFinite(d.target.__goalFit) ? d.target.__goalFit.toFixed(2) : '')
-      .attr('data-recommendation-rank', d => Number.isFinite(d.target.__recommendationRank) ? d.target.__recommendationRank.toFixed(2) : '')
-      .attr('stroke', d => d.target.__displayColor || '#64748b')
-      .call(selection => applyLinkStrokeWidth(selection))
-      .attr('opacity', d => linkOpacity(d))
-      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+      .attr('fill', d => d.target.__displayColor || 'var(--ft-text-tertiary)')
+      .attr('fill-opacity', d => clampNumber((d.target.__branchPriority || 0) / 100 * 0.48 + 0.34, 0.16, 0.82) * (d.target.data.status === 'done' ? 0.5 : d.target.data.status === 'dormant' ? 0.42 : 1))
+      .attr('stroke', 'none')
+      .attr('d', d => branchPath(d, branchWidth(d.source.__branchPriority), branchWidth(d.target.__branchPriority)))
+
+    g.selectAll('.critical-path-line')
+      .data(links.filter(d => (d.target.__branchPriority || 0) >= (d.source.__branchPriority || 0)))
+      .join('path')
+      .attr('class', 'critical-path-line')
+      .attr('d', d => centerLinePath(d))
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--ft-text-primary)')
+      .attr('stroke-width', 1)
+      .attr('opacity', .12)
+      .attr('pointer-events', 'none')
 
     // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
     g.selectAll('.terminal-branch-add-hit')
@@ -419,7 +388,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .join('path')
       .attr('class', 'terminal-branch-add-hit')
       .attr('data-target-id', d => d.target.data.id || '')
-      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+      .attr('d', d => centerLinePath(d))
       .attr('fill', 'none')
       .attr('stroke', 'transparent')
       .attr('stroke-width', d => Math.max(TERMINAL_BRANCH_HIT_WIDTH, linkStrokeWidth(d) + 10))
@@ -434,6 +403,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('class', 'node')
       .attr('data-node-id', d => d.data.id || '')
       .attr('transform', d => `translate(${d.y},${d.x})`)
+      .attr('role', d => d.data.type === 'root' ? undefined : 'treeitem')
+      .attr('aria-expanded', d => d.data.type === 'root' ? undefined : Boolean(d.data.expanded !== false))
+      .attr('aria-selected', d => d.data.id === highlightedNodeId ? 'true' : 'false')
+      .attr('aria-label', d => d.data.type === 'root' ? '专注树根节点' : nodeAriaLabel(d.data, d))
       .style('cursor', 'pointer')
 
     // 单击：选中节点
@@ -478,10 +451,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     node.filter(d => d.data.type !== 'root')
       .append('rect')
       .attr('class', 'node-hit-area')
-      .attr('x', d => -getNodeRadius(d.data.type) - NODE_HIT_PADDING)
-      .attr('y', d => -getNodeRadius(d.data.type) - NODE_HIT_PADDING)
-      .attr('width', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING + DROP_LABEL_WIDTH)
-      .attr('height', d => getNodeRadius(d.data.type) * 2 + NODE_HIT_PADDING * 2)
+      .attr('x', d => -getNodeRadius(d.data, d.__directPriority) - NODE_HIT_PADDING)
+      .attr('y', d => -getNodeRadius(d.data, d.__directPriority) - NODE_HIT_PADDING)
+      .attr('width', d => getNodeRadius(d.data, d.__directPriority) * 2 + NODE_HIT_PADDING + DROP_LABEL_WIDTH)
+      .attr('height', d => getNodeRadius(d.data, d.__directPriority) * 2 + NODE_HIT_PADDING * 2)
       .attr('fill', 'transparent')
 
     // 小 drag handle：紧贴圆点一圈，仅这里能起手拖拽
@@ -490,108 +463,126 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     node.filter(d => d.data.type !== 'root')
       .append('rect')
       .attr('class', 'node-drag-handle')
-      .attr('x', d => -getNodeRadius(d.data.type) - DRAG_HANDLE_PADDING)
-      .attr('y', d => -getNodeRadius(d.data.type) - DRAG_HANDLE_PADDING)
-      .attr('width', d => (getNodeRadius(d.data.type) + DRAG_HANDLE_PADDING) * 2)
-      .attr('height', d => (getNodeRadius(d.data.type) + DRAG_HANDLE_PADDING) * 2)
+      .attr('x', d => -getNodeRadius(d.data, d.__directPriority) - DRAG_HANDLE_PADDING)
+      .attr('y', d => -getNodeRadius(d.data, d.__directPriority) - DRAG_HANDLE_PADDING)
+      .attr('width', d => (getNodeRadius(d.data, d.__directPriority) + DRAG_HANDLE_PADDING) * 2)
+      .attr('height', d => (getNodeRadius(d.data, d.__directPriority) + DRAG_HANDLE_PADDING) * 2)
       .attr('fill', 'transparent')
       .style('cursor', 'grab')
 
-    // 紧急优先级 halo：不改变主色，只加一个轻微的视觉层。
-    node.filter(d => d.__isUrgent)
+    // 节点大小、辉光、年轮分别承载 direct / cultivation。
+    node.filter(d => d.data.type !== 'root' && glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority))
       .append('circle')
-      .attr('class', 'node-priority-halo')
-      .attr('r', d => getNodeRadius(d.data.type) + 4)
-      .attr('fill', 'none')
-      .attr('stroke', 'rgba(248,250,252,0.62)')
-      .attr('stroke-width', 1.4)
-      .attr('stroke-dasharray', '3,3')
+      .attr('class', 'node-direct-glow')
+      .attr('r', d => glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority).radius)
+      .attr('fill', d => d.__displayColor || 'var(--ft-accent)')
+      .attr('opacity', d => glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority).opacity)
+      .attr('filter', nodes.length > 400 ? null : 'url(#ft-glow)')
       .attr('pointer-events', 'none')
 
-    // 圆圈
+    node.filter(d => d.data.type !== 'root' && layers?.rings !== false)
+      .append('g')
+      .attr('class', 'node-growth-rings')
+      .each(function (d) {
+        const rings = ringValues(getNodeRadius(d.data, d.__directPriority), d.__cultivationScore, nodes.length > 300)
+        d3.select(this).selectAll('circle').data(rings).join('circle')
+          .attr('r', ring => ring.radius)
+          .attr('fill', 'none')
+          .attr('stroke', d.__displayColor || 'var(--ft-text-tertiary)')
+          .attr('stroke-width', .75)
+          .attr('opacity', ring => ring.opacity)
+          .attr('pointer-events', 'none')
+      })
+
+    // 圆圈：active 实心、dormant 虚线空心、done 去饱和并带对勾。
     node.filter(d => d.data.type !== 'root')
       .append('circle')
       .attr('class', 'node-main-circle')
-      .attr('r', d => getNodeRadius(d.data.type))
-      .attr('fill', d => d.__displayColor || '#64748b')
-      .attr('stroke', d => nodeStrokeColor(d))
-      .attr('stroke-width', d => nodeStrokeWidth(d))
-      .attr('opacity', d => d.__visualOpacity ?? 1)
-      .attr('filter', d => nodeFilter(d))
+      .attr('r', d => getNodeRadius(d.data, d.__directPriority))
+      .attr('fill', d => d.data.status === 'dormant' ? 'var(--ft-canvas)' : d.__displayColor || 'var(--ft-text-tertiary)')
+      .attr('stroke', d => d.data.status === 'dormant' ? (d.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(d))
+      .attr('stroke-width', d => d.data.status === 'dormant' ? 1.5 : nodeStrokeWidth(d))
+      .attr('stroke-dasharray', d => d.data.status === 'dormant' ? '2 2' : null)
+      .attr('opacity', d => d.data.status === 'dormant' ? .38 : d.data.status === 'done' ? .45 : (d.__visualOpacity ?? 1))
+      .attr('filter', d => d.data.status === 'done' ? null : nodeFilter(d))
       .style('cursor', 'grab')
       .on('mouseenter', function (event, d) {
-        d3.select(this).attr('r', getNodeRadius(d.data.type) * 1.14)
+        d3.select(this).attr('r', getNodeRadius(d.data, d.__directPriority) * 1.14)
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', addDisabledRef.current ? 0 : 1)
-        d3.select(this.parentNode).select('.node-status-mark').attr('opacity', 0)
+        d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => Math.min(1, ring.opacity * 2.2))
       })
       .on('mouseleave', function (event, d) {
-        d3.select(this).attr('r', getNodeRadius(d.data.type))
+        d3.select(this).attr('r', getNodeRadius(d.data, d.__directPriority))
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', 0)
-        d3.select(this.parentNode).select('.node-status-mark').attr('opacity', 1)
+        d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => ring.opacity)
       })
 
-    // 完成勾
+    node.filter(d => d.data.status === 'done' && getNodeRadius(d.data, d.__directPriority) >= 8)
+      .append('path')
+      .attr('class', 'node-done-mark')
+      .attr('d', 'M-4,0 L-1,3 L5,-4')
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--ft-canvas)')
+      .attr('stroke-width', 1.7)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .attr('pointer-events', 'none')
+
     node.filter(d => d.data.status === 'done')
       .append('text')
-      .attr('class', 'node-status-mark')
+      .attr('class', 'node-status-mark node-status-label')
+      .attr('x', d => getNodeRadius(d.data, d.__directPriority) + 7)
       .attr('dy', '0.35em')
-      .attr('text-anchor', 'middle')
-      .attr('fill', '#0f1117')
-      .attr('font-size', d => getNodeRadius(d.data.type) * 0.9)
+      .attr('fill', 'var(--ft-text-tertiary)')
+      .attr('font-size', 9)
       .attr('pointer-events', 'none')
-      .text('✓')
+      .text('完成')
 
     node.filter(d => d.data.status === 'dormant')
       .append('text')
       .attr('class', 'node-status-mark')
       .attr('dy', '0.35em')
       .attr('text-anchor', 'middle')
-      .attr('fill', '#0f1117')
-      .attr('font-size', d => getNodeRadius(d.data.type) * 0.7)
-      .attr('font-weight', 700)
+      .attr('fill', 'var(--ft-text-tertiary)')
+      .attr('font-size', 9)
       .attr('pointer-events', 'none')
-      .text('||')
+      .text('暂停')
 
-    const dueMarker = node.filter(d => d.__dueVisible)
+    node.filter(d => d.__isUrgent)
+      .append('path')
+      .attr('class', 'node-urgent-mark')
+      .attr('d', d => {
+        const r = getNodeRadius(d.data, d.__directPriority)
+        return `M0,${-r - 7} C-4,${-r - 1} -3,${-r + 1} 0,${-r + 3} C3,${-r + 1} 4,${-r - 1} 0,${-r - 7}Z`
+      })
+      .attr('fill', 'var(--ft-text-primary)')
+      .attr('pointer-events', 'none')
+
+    const dueMarker = node.filter(d => d.__dueVisible && layers?.dueArc !== false)
       .append('g')
       .attr('class', 'node-due-marker')
-      .attr('transform', d => {
-        const r = getNodeRadius(d.data.type)
-        return `translate(${r + 12},${-r - 11})`
-      })
       .attr('pointer-events', 'none')
-
-    dueMarker.append('rect')
-      .attr('x', d => {
-        const label = dueMarkerLabel(d.__dueState)
-        return -(label.length > 1 ? 13 : 9)
-      })
-      .attr('y', -7)
-      .attr('width', d => dueMarkerLabel(d.__dueState).length > 1 ? 26 : 18)
-      .attr('height', 14)
-      .attr('rx', 5)
-      .attr('ry', 5)
-      .attr('fill', d => dueMarkerColors(d.__dueState).fill)
-      .attr('stroke', d => dueMarkerColors(d.__dueState).stroke)
-      .attr('stroke-width', 1)
-
-    dueMarker.append('text')
-      .attr('text-anchor', 'middle')
-      .attr('dy', '0.34em')
-      .attr('fill', d => dueMarkerColors(d.__dueState).text)
-      .attr('font-size', 9)
-      .attr('font-weight', 700)
-      .text(d => dueMarkerLabel(d.__dueState))
+    dueMarker.append('path')
+      .attr('d', d => dueArcPath(getNodeRadius(d.data, d.__directPriority) + 3.5, d.__dueState))
+      .attr('fill', 'none')
+      .attr('stroke', d => dueColor(d.__dueState?.state))
+      .attr('stroke-width', 2)
+      .attr('stroke-linecap', 'round')
+      .attr('opacity', d => d.__dueState?.state === 'overdue' ? .85 : .72)
 
     // 标签
-    node.filter(d => shouldShowLabel(d, density))
+    node.filter(d => shouldShowLabel(d, density, zoomScale))
       .append('text')
       .attr('class', 'node-label')
-      .attr('x', d => getNodeRadius(d.data.type) + 6)
+      .attr('x', d => getNodeRadius(d.data, d.__directPriority) + 10)
       .attr('dy', '0.35em')
-      .attr('fill', '#d1d5db')
+      .attr('fill', 'var(--ft-text-primary)')
       .attr('font-size', d => d.data.type === 'project' ? 13 : 11)
-      .attr('font-weight', d => d.data.type === 'project' ? 600 : 400)
+      .attr('font-weight', d => d.data.type === 'project' ? 500 : 400)
+      .attr('paint-order', 'stroke fill')
+      .attr('stroke', 'var(--ft-canvas)')
+      .attr('stroke-width', 3)
+      .attr('stroke-linejoin', 'round')
       .attr('pointer-events', 'auto')
       .style('cursor', 'pointer')
       .on('click', (event, d) => {
@@ -603,7 +594,23 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         event.stopPropagation()
         onNodeToggleRef.current?.(d.data)
       })
-      .text(d => d.data.name)
+      .text(d => truncateLabel(d.data.name))
+
+    if (layers?.labels !== false) {
+      node.filter(d => d.data.type !== 'root' && shouldShowLabel(d, density, zoomScale))
+        .append('text')
+        .attr('class', 'node-score-label')
+        .attr('x', d => getNodeRadius(d.data, d.__directPriority) + 10)
+        .attr('y', 14)
+        .attr('fill', 'var(--ft-text-tertiary)')
+        .attr('font-family', 'var(--ft-font-mono)')
+        .attr('font-size', 9)
+        .attr('paint-order', 'stroke fill')
+        .attr('stroke', 'var(--ft-canvas)')
+        .attr('stroke-width', 3)
+        .attr('pointer-events', 'none')
+        .text(d => `d ${Math.round(d.__directPriority || 0)} · b ${Math.round(d.__branchPriority || 0)} · c ${Math.round(d.__cultivationScore || 0)}`)
+    }
 
     // 居中定位
     const xs = nodes.map(d => d.y)
@@ -625,7 +632,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       autoCenteredRef.current = true
     }
 
-  }, [treeData, userGoal, density, startInlineRename, priorityCalculationVersion])
+  }, [treeData, theme, userGoal, density, zoomScale, layers, startInlineRename, priorityCalculationVersion, highlightedNodeId])
 
   // ── 高亮：监听 highlightedNodeId 变化，更新节点圆圈 + 祖先路径 ──
   useEffect(() => {
@@ -651,9 +658,9 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
 
     // 高亮目标节点的 circle
     g.selectAll(`.node[data-node-id="${highlightedNodeId}"] .node-main-circle`)
-      .attr('stroke', '#60a5fa')
+      .attr('stroke', 'var(--ft-ai)')
       .attr('stroke-width', 3)
-      .attr('filter', 'drop-shadow(0 0 6px rgba(96,165,250,0.7))')
+      .attr('filter', 'url(#ft-glow)')
 
     // 祖先链 → 高亮路径上的 link
     const ancestorIds = new Set(target.ancestors().map(a => a.data.id).filter(Boolean))
@@ -724,7 +731,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       const targetParentId = targetNode?.data?.parent_id || null
       if (sourceParentId === targetParentId) {
         const [pointerX, pointerY] = d3.pointer({ clientX, clientY }, gRef.current)
-        const radius = getNodeRadius(targetNode.data.type)
+        const radius = getNodeRadius(targetNode.data, targetNode.__directPriority)
         const dx = pointerX - targetNode.y
         const dy = pointerY - targetNode.x
         const moveBand = Math.max(DROP_MOVE_BAND_MIN, radius * 0.65)
@@ -785,7 +792,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       for (const candidate of root.descendants()) {
         if (candidate.data.id === sourceId || candidate.data.type === 'root') continue
 
-        const radius = getNodeRadius(candidate.data.type)
+        const radius = getNodeRadius(candidate.data, candidate.__directPriority)
         const dx = x - candidate.y
         const dy = y - candidate.x
         const distance = Math.hypot(dx, dy)
@@ -982,7 +989,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         .attr('class', 'drag-preview-link')
         .attr('d', dragPreviewPath(startX, startY, startX, startY))
         .attr('fill', 'none')
-        .attr('stroke', '#60a5fa')
+        .attr('stroke', 'var(--ft-ai)')
         .attr('stroke-width', 2.5)
         .attr('stroke-linecap', 'round')
         .attr('stroke-dasharray', '5,4')
@@ -999,12 +1006,12 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         .style('opacity', 0)
       previewBadge.append('rect')
         .attr('rx', 4).attr('ry', 4)
-        .attr('fill', 'rgba(15, 17, 23, 0.92)')
-        .attr('stroke', '#60a5fa')
+        .attr('fill', 'var(--ft-surface-raised)')
+        .attr('stroke', 'var(--ft-ai)')
         .attr('stroke-width', 1)
       previewBadge.append('text')
         .attr('class', 'drag-preview-badge-text')
-        .attr('fill', '#e5e7eb')
+        .attr('fill', 'var(--ft-text-primary)')
         .attr('font-size', 11)
         .attr('text-anchor', 'middle')
         .attr('dy', '0.35em')
@@ -1111,7 +1118,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
             label = addPreviewLabel(dragRef.current.addType, dragRef.current.sameLevelAdd)
           }
           dragRef.current.previewLine
-            ?.attr('stroke', !drop?.node && addGesture ? '#34d399' : '#60a5fa')
+            ?.attr('stroke', !drop?.node && addGesture ? 'var(--ft-accent)' : 'var(--ft-ai)')
           const badge = dragRef.current.previewBadge
           const text = badge.select('.drag-preview-badge-text').text(label)
           const padX = 8
@@ -1136,7 +1143,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
           }
           if (drop?.el) {
             d3.select(drop.el).select('.node-main-circle')
-              .attr('stroke', drop.mode === 'reorder' ? '#f59e0b' : '#34d399')
+              .attr('stroke', drop.mode === 'reorder' ? 'var(--ft-warn)' : 'var(--ft-accent)')
               .attr('stroke-width', 3)
           }
           dragRef.current.hoverEl = drop?.el || null
@@ -1259,13 +1266,15 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
   }, [])
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', overscrollBehavior: 'none' }}>
+    <div className="ft-tree-view" style={{ width: '100%', height: '100%', position: 'relative', overscrollBehavior: 'none' }}>
       <svg
         ref={svgRef}
         width="100%"
         height="100%"
+        role="tree"
+        aria-label="专注树结构画布"
+        className="ft-tree-svg"
         style={{
-          background: '#0f1117',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           WebkitTouchCallout: 'none',
@@ -1276,33 +1285,21 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         <g ref={gRef} />
       </svg>
 
-      <div
-        className="absolute bottom-4 right-4 z-20 flex items-center overflow-hidden rounded-md border border-gray-700 bg-gray-950/92 shadow-xl backdrop-blur"
-        onMouseDown={event => event.stopPropagation()}
-        onPointerDown={event => event.stopPropagation()}
-      >
-        <ZoomControlButton
-          label="-"
-          title="缩小"
-          disabled={zoomScale <= ZOOM_MIN * 1.01}
-          onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
-        />
-        <div className="h-8 min-w-14 border-x border-gray-800 px-2 text-center text-[11px] leading-8 text-gray-400 tabular-nums">
-          {Math.round(zoomScale * 100)}%
-        </div>
-        <ZoomControlButton
-          label="+"
-          title="放大"
-          disabled={zoomScale >= ZOOM_MAX * 0.99}
-          onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
-        />
-        <ZoomControlButton
-          label="1:1"
-          title="回到全局视图"
-          onClick={resetZoom}
-          wide
-        />
-      </div>
+      <CanvasControls
+        zoomScale={zoomScale}
+        onZoomIn={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+        onZoomOut={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+        onReset={() => zoomRef.current?.scaleTo?.(d3.select(svgRef.current), 1)}
+        onFit={resetZoom}
+        showMore={controlsOpen}
+        onToggleMore={() => setControlsOpen(value => !value)}
+        density={density}
+        onDensityChange={onDensityChange}
+        onExpandAll={onExpandAll}
+        onCollapseAll={onCollapseAll}
+        layers={layers}
+        onLayerChange={onLayerChange}
+      />
 
       {editingNode && (
         <input
@@ -1321,7 +1318,7 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
               cancelInlineRename()
             }
           }}
-          className="fixed z-[1100] rounded-md border border-blue-500 bg-gray-950 px-2 py-1 text-sm text-gray-100 shadow-xl outline-none"
+          className="ft-inline-edit"
           style={{
             left: editingNode.left,
             top: editingNode.top,
@@ -1350,23 +1347,5 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
         />
       )}
     </div>
-  )
-}
-
-function ZoomControlButton({ label, title, disabled = false, onClick, wide = false }) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={event => {
-        event.preventDefault()
-        event.stopPropagation()
-        onClick?.()
-      }}
-      className={`h-8 ${wide ? 'w-11' : 'w-8'} text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white disabled:cursor-not-allowed disabled:text-gray-700 disabled:hover:bg-transparent`}
-    >
-      {label}
-    </button>
   )
 }

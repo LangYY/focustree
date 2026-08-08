@@ -28,3 +28,20 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - `hasStructuring` 判定收紧为 `proposed_panel_changes || deferred_or_unsure`。原包用 `proposed_panel_changes || open_questions`，但 `open_questions` 在推荐类回复中同样出现，会把推荐场景误标成"为什么这样整理"。
 
 **教训**：外部交付的代码包必须先确认其基线 commit，再判断能否合并。行数变少不等于是精简，也可能是回退。
+
+---
+
+## 2026-08-08 — FocusTree 全量 UI 重做
+
+### 决策
+
+- UI 以 `DESIGN.md` 为准，建立 token-first 视觉系统；主题变量集中在 `src/styles/tokens.css`，分支色板集中在 `src/lib/branchPalette.js`。
+- 采用“画布 + 左 rail + 单右抽屉”布局，Chat / Inbox / Detail / Audit 是固定工作面；Focus / List / Review 作为主画布模式。
+- 三个优先级信号分别映射为节点半径与辉光、填充枝干宽度、培育年轮；期限弧、紧急芽点、状态形状只提供辅助语义。
+- UI 重做不改 `server/`、优先级引擎、分析协议、数据库和既有 hook 签名；用纯 render helper 拆分 D3 视觉计算，保留原交互层。
+
+### 验证与经验
+
+- 新增 `lucide-react` 后完成生产构建；Windows 沙箱中的 Node 子进程会触发 `spawn EPERM`，构建和测试需在受限沙箱外执行。
+- 旧全局 `.link { fill: none }` 会覆盖新枝干填充，已删除；这是迁移旧 D3 样式时需要重点检查的冲突类型。
+- Inbox 预览使用克隆树重算本地优先级，且将活动/已处理条目 memo 化，避免预览 state 更新造成 effect 循环。

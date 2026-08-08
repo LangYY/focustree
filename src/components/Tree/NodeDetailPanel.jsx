@@ -158,8 +158,14 @@ export default function NodeDetailPanel({
     ? '保存中'
     : saveError || (invalidTitle ? '标题不能为空' : (canSave || planningDirty ? '等待自动保存' : '已保存'))
 
+  const scores = [
+    ['现在', node.__directPriority, 'accent'],
+    ['未来', node.__branchPriority, 'ai'],
+    ['培育', node.__cultivationScore, 'warn'],
+  ]
+
   return (
-    <aside className="w-[320px] min-w-[300px] max-w-[360px] border-l border-gray-800 bg-gray-950/98 text-gray-100 flex flex-col">
+    <aside className="ft-detail-panel w-[320px] min-w-[300px] max-w-[360px] border-l border-gray-800 bg-gray-950/98 text-gray-100 flex flex-col">
       <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
         <div>
           <div className="text-[11px] text-gray-500">{typeLabel(node.type)}详情</div>
@@ -175,7 +181,8 @@ export default function NodeDetailPanel({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="ft-detail-scroll flex-1 overflow-y-auto px-4 py-4">
+        <div className="ft-detail-breadcrumb"><span>根</span>{node.parent_id ? <span>…</span> : null}<span><i className="ft-branch-dot" />{node.name}</span></div>
         <label className="mb-2 block text-xs text-gray-400">标题</label>
         <input
           value={title}
@@ -198,6 +205,10 @@ export default function NodeDetailPanel({
           }}
           className="mb-4 w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
         />
+
+        <div className="ft-detail-scores" aria-label="三个优先级信号">
+          {scores.map(([label, value, tone]) => <div className="ft-detail-score" key={label}><span>{label}</span><span className="ft-progress" data-tone={tone}><span style={{ width: `${Math.max(0, Math.min(100, Number(value) || 0))}%` }} /></span><b>{Math.round(value || 0)}</b></div>)}
+        </div>
 
         <div className="mb-4">
           <div className="mb-2 text-xs text-gray-400">状态</div>
@@ -237,7 +248,7 @@ export default function NodeDetailPanel({
                   className={`rounded-md border px-1.5 py-1.5 text-xs transition-colors ${
                     active
                       ? value === 'urgent'
-                        ? 'border-white/70 bg-white/10 text-white shadow-[0_0_12px_rgba(255,255,255,0.12)]'
+                        ? 'ft-urgent-priority border-white/70 bg-white/10 text-white'
                         : 'border-blue-500 bg-blue-600/20 text-blue-100'
                       : 'border-gray-800 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-100'
                   }`}

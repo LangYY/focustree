@@ -135,7 +135,7 @@ export async function autoBackup(userId, opts = {}) {
   const key = `${prefix}${userId}_${Date.now()}`
   try {
     localStorage.setItem(key, JSON.stringify(backup))
-  } catch (e) {
+  } catch {
     // 配额溢出：清掉一些旧的再试
     pruneAuto(userId, true)
     try {
@@ -284,7 +284,9 @@ function remapUserId(tables, newUserId) {
 
 function stripRuntime(row) {
   // 去掉前端附加的运行时字段，避免 INSERT 报错
-  const { children, annotations, ...rest } = row
+  const rest = { ...row }
+  delete rest.children
+  delete rest.annotations
   return rest
 }
 
