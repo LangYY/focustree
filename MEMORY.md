@@ -45,3 +45,11 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 新增 `lucide-react` 后完成生产构建；Windows 沙箱中的 Node 子进程会触发 `spawn EPERM`，构建和测试需在受限沙箱外执行。
 - 旧全局 `.link { fill: none }` 会覆盖新枝干填充，已删除；这是迁移旧 D3 样式时需要重点检查的冲突类型。
 - Inbox 预览使用克隆树重算本地优先级，且将活动/已处理条目 memo 化，避免预览 state 更新造成 effect 循环。
+
+---
+
+## 2026-08-09 — UI 重做发布到 ECS
+
+- 将全量 UI 重做提交为 `31c708f` 并推送到 GitHub `feature/priority-engine-v2`。
+- 确认线上沿用既有 ECS 生产服务部署方式，不是 Docker；通过 GitHub 拉取新版本到独立目录，远程 `npm ci` 和 `npm run build` 成功后再切换服务。
+- 未改动线上 `.env`，切换前将旧版本原样保留在远程回滚备份中；新服务启动后公网首页和健康检查均验证通过。

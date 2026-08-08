@@ -1,6 +1,6 @@
 # HANDOFF
 
-最后更新：2026-08-08。当前 UI 重做已完成，产品状态以本文件为准；历史决策写入 `MEMORY.md`。
+最后更新：2026-08-09。当前 UI 重做已完成并已发布，产品状态以本文件为准；历史决策写入 `MEMORY.md`。
 
 ## 当前状态
 
@@ -27,6 +27,12 @@
 - `npm run lint`：0 errors；5 个既有 React Hook exhaustive-deps warnings，集中在 `useChat.js`/`useWeeklyReview.js`。
 - `npm run build`：通过。Vite 提示 `runtime-config.js` 缺少 `type="module"`，并提示主 chunk 大于 500 kB；均为已有构建提示，不影响产物生成。
 - 本地开发服务器已验证：`http://127.0.0.1:5173/`。当前 `.env` 的 Supabase/AI 值为空，浏览器只能进入配置提示页，无法在本地会话中验证登录后的真实树数据。
+
+## 线上部署
+
+- GitHub：`https://github.com/LangYY/focustree`，分支 `feature/priority-engine-v2`，发布 commit `31c708f`。
+- ECS：沿用现有生产服务部署方式完成发布；线上 `.env` 未被覆盖，旧版本已保留在远程回滚备份中。
+- 发布后的公网健康检查通过，AI 与数据库集成状态正常。
 
 ## 后续
 
