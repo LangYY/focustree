@@ -9,12 +9,17 @@ import {
   getNodeDueState,
   isUrgentPriority,
 } from '../../lib/treeUtils'
+import { LEAF_GLYPHS } from '../../lib/leafGlyphs'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
 
 const MARGIN = { top: 20, right: 120, bottom: 20, left: 60 }
 const NODE_H_GAP = 220
 const NODE_V_GAP = 48
+// 流束连线：均匀线宽 + 剥离弧圆润度（供渲染与高亮两处共用）
+const FLOW_STROKE_WIDTH = 2.6
+const FLOW_HIGHLIGHT_WIDTH = 3.8
+const FLOW_CTRL_RATIO = 0.6
 const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
@@ -179,8 +184,86 @@ function applyLinkStrokeWidth(selection, extra = 0) {
 
 function linkOpacity(d) {
   const opacity = d?.target?.__visualOpacity ?? 1
-  const boosted = d?.target?.__isUrgent || d?.target?.__dueVisible ? 0.72 : 0.48
-  return clampNumber(opacity * boosted, 0.22, 0.86)
+  const boosted = d?.target?.__isUrgent || d?.target?.__dueVisible ? 0.95 : 0.82
+  return clampNumber(opacity * boosted, 0.3, 0.95)
+}
+
+// ── 叶片：沿流束连线摆放用户素材（叶柄锚定、互生、标签避让）──
+const LEAF_INK = '#2C382F'
+const LEAF_PANEL = '#FDFBF4'
+function leafRand(s) { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x) }
+// 采样一条流束连线为 SVG 坐标点串（视觉横向 = node.y，纵向 = node.x）
+function flowSamplesSVG(link, N) {
+  const sx = link.source.y, sy = link.source.x, tx = link.target.y, ty = link.target.x
+  const k = Math.max(38, (tx - sx) * FLOW_CTRL_RATIO)
+  const c1x = sx + k, c2x = tx - k
+  const out = []
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, v = 1 - t
+    out.push({
+      x: v*v*v*sx + 3*v*v*t*c1x + 3*v*t*t*c2x + t*t*t*tx,
+      y: v*v*v*sy + 3*v*v*t*sy + 3*v*t*t*ty + t*t*t*ty,
+    })
+  }
+  return out
+}
+function leafTangent(pts, i) {
+  const a = pts[Math.max(0, i-1)], b = pts[Math.min(pts.length-1, i+1)]
+  const dx = b.x-a.x, dy = b.y-a.y, L = Math.hypot(dx, dy) || 1
+  return { x: dx/L, y: dy/L }
+}
+function glyphLeafMarkup(x, y, angDeg, size, seed) {
+  if (!LEAF_GLYPHS.length) return ''
+  const g = LEAF_GLYPHS[Math.floor(leafRand(seed) * LEAF_GLYPHS.length) % LEAF_GLYPHS.length]
+  const s = size / Math.max(g.w, g.h), rot = angDeg - g.ang
+  const inner = g.paths.map(p =>
+    `<path d="${p.d}" transform="translate(${(p.tx-g.ox).toFixed(1)},${(p.ty-g.oy).toFixed(1)})" fill="${p.dark ? 'currentColor' : LEAF_PANEL}"/>`
+  ).join('')
+  return `<g color="${LEAF_INK}" transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${s.toFixed(4)}) translate(${(-g.px).toFixed(1)},${(-g.py).toFixed(1)})">${inner}</g>`
+}
+function stemLeafMarkup(x, y, angDeg, size, seed) {
+  const a = angDeg * Math.PI / 180, sx = x + Math.cos(a)*6, sy = y + Math.sin(a)*6
+  return `<path d="M${x.toFixed(1)},${y.toFixed(1)} Q${(x+Math.cos(a)*3.5).toFixed(1)},${(y+Math.sin(a)*3.5).toFixed(1)} ${sx.toFixed(1)},${sy.toFixed(1)}" fill="none" stroke="${LEAF_INK}" stroke-width="1.4" stroke-linecap="round"/>`
+    + glyphLeafMarkup(sx, sy, angDeg + (leafRand(seed)-0.5)*24, size, seed)
+}
+function leafBoxHit(cx, cy, r, b) {
+  const nx = Math.max(b.x, Math.min(cx, b.x + b.w)), ny = Math.max(b.y, Math.min(cy, b.y + b.h))
+  return (cx-nx)**2 + (cy-ny)**2 < r*r
+}
+function buildLeavesMarkup(links, nodes) {
+  if (!LEAF_GLYPHS.length) return ''
+  // 标签包围盒（SVG 坐标）：叶子撞到就换边或跳过
+  const boxes = nodes.filter(n => n.data.type !== 'root').map(n => {
+    const r = getNodeRadius(n.data.type)
+    const fs = n.data.type === 'project' ? 13.5 : n.data.type === 'category' ? 12 : 11
+    const name = n.data.name || ''
+    const wpx = name.replace(/[^\x00-\xff]/g, 'XX').length * fs * 0.52 + 8
+    return { x: n.y + r + 4, y: n.x - 11, w: wpx + 8, h: 22 }
+  })
+  let out = '', total = 0
+  const CAP = 90
+  for (const link of links) {
+    if (total >= CAP) break
+    if (link.target.data.type === 'root') continue
+    const pts = flowSamplesSVG(link, 20)
+    const leafEdge = !(link.target.children && link.target.children.length)
+    const count = leafEdge ? 2 : 1
+    const baseSide = leafRand(link.target.x * 7 + link.target.y * 3) > 0.5 ? 1 : -1
+    for (let n = 0; n < count; n++) {
+      const u = 0.5 + 0.42 * (count === 1 ? 0 : n / (count - 1)) + (leafRand(link.target.depth * 13 + n) - 0.5) * 0.1
+      const i = Math.max(1, Math.min(pts.length - 2, Math.floor(pts.length * u)))
+      const tg = leafTangent(pts, i), tgA = Math.atan2(tg.y, tg.x) * 180 / Math.PI
+      const side = n % 2 ? -baseSide : baseSide
+      const size = 26 + leafRand(link.target.depth * 7 + n) * 10
+      const ang = tgA + side * (30 + leafRand(link.target.x + n) * 18)
+      const rad = ang * Math.PI / 180
+      const bx = pts[i].x + Math.cos(rad) * size * 0.55, by = pts[i].y + Math.sin(rad) * size * 0.55
+      if (boxes.some(b => leafBoxHit(bx, by, size * 0.5, b))) continue
+      out += stemLeafMarkup(pts[i].x, pts[i].y, ang, size, (link.target.depth * 31 + n * 13 + (link.target.y | 0)))
+      total++
+    }
+  }
+  return out
 }
 
 function nodeStrokeColor(d) {
@@ -409,6 +492,11 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const linkLayer = g.select('.layer-links')
     const hitLayer  = g.select('.layer-hits')
     const nodeLayer = g.select('.layer-nodes')
+    // 叶子层：装饰、不响应交互，夹在连线上方、命中/节点下方
+    let leafLayer = g.select('.layer-leaves')
+    if (leafLayer.empty()) {
+      leafLayer = g.insert('g', '.layer-hits').attr('class', 'layer-leaves').attr('pointer-events', 'none')
+    }
 
     // ── 树枝展开动画的位置账本 ──
     const prevPos = prevPosRef.current
@@ -434,8 +522,17 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
     const DUR = 480
     const EXIT_DUR = 320
     const EASE = d3.easeCubicOut
-    const diagonal = d3.linkHorizontal().x(d => d.y).y(d => d.x)
-    const collapsedPath = (pt) => diagonal({ source: pt, target: pt })
+    // ── 流束剥离连线：两端水平切线 + 拉长控制柄 → 平直段 + 局部圆润换轨 ──
+    // 视觉坐标：横向 = node.y（深度），纵向 = node.x
+    const FLOW_K = FLOW_CTRL_RATIO  // 控制柄占水平跨度比例 → 剥离弧的圆润度
+    const FLOW_STROKE = FLOW_STROKE_WIDTH  // 均匀线宽（不再按 flow 变粗）
+    const diagonal = (link) => {
+      const sx = link.source.y, sy = link.source.x
+      const tx = link.target.y, ty = link.target.x
+      const k = Math.max(38, (tx - sx) * FLOW_K)
+      return `M${sx},${sy} C${sx + k},${sy} ${tx - k},${ty} ${tx},${ty}`
+    }
+    const collapsedPath = (pt) => `M${pt.y},${pt.x} C${pt.y},${pt.x} ${pt.y},${pt.x} ${pt.y},${pt.x}`
 
     // ── 链接线：keyed join + 生长/收回过渡 ──
     const linkKey = d => d.target.data.id
@@ -469,14 +566,16 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .delay(d => Math.min((d.target.depth - enterLinkMinDepth) * 70, 560))
       .attr('d', diagonal)
       .attr('stroke', d => d.target.__displayColor || '#7A8578')
-      .call(sel => applyLinkStrokeWidth(sel))
+      .attr('stroke-width', FLOW_STROKE)
+      .style('stroke-width', `${FLOW_STROKE}px`)
       .attr('opacity', d => linkOpacity(d))
 
-    // 存量枝：平滑滑到新位置 + 更新粗细颜色
+    // 存量枝：平滑滑到新位置 + 更新颜色（线宽均匀）
     linkSel.transition('grow').duration(DUR).ease(EASE)
       .attr('d', diagonal)
       .attr('stroke', d => d.target.__displayColor || '#7A8578')
-      .call(sel => applyLinkStrokeWidth(sel))
+      .attr('stroke-width', FLOW_STROKE)
+      .style('stroke-width', `${FLOW_STROKE}px`)
       .attr('opacity', d => linkOpacity(d))
 
     // 折叠的枝：缩回父节点后移除
@@ -485,6 +584,10 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('d', d => collapsedPath(exitTarget(d.target)))
       .attr('opacity', 0)
       .remove()
+
+    // ── 叶子：沿连线摆放（整层重画，装饰性，淡入避免生硬）──
+    leafLayer.html(buildLeavesMarkup(links, nodes))
+    leafLayer.attr('opacity', 0).transition('leaf-fade').duration(DUR).attr('opacity', 1)
 
     // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
     hitLayer.selectAll('.terminal-branch-add-hit')
@@ -745,9 +848,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       .attr('filter', d => nodeFilter(d))
     g.selectAll('.link')
       .attr('opacity', d => linkOpacity(d))
-      .each(function () {
-        applyLinkStrokeWidth(d3.select(this))
-      })
+      .attr('stroke-width', FLOW_STROKE_WIDTH)
+      .style('stroke-width', `${FLOW_STROKE_WIDTH}px`)
 
     if (!highlightedNodeId || !rootRef.current) return
 
@@ -768,9 +870,8 @@ export default function TreeView({ treeData, userGoal, density, onNodeSelect, on
       if (ancestorIds.has(tid)) {
         d3.select(this)
           .attr('opacity', 0.95)
-          .each(function () {
-            applyLinkStrokeWidth(d3.select(this), 1.5)
-          })
+          .attr('stroke-width', FLOW_HIGHLIGHT_WIDTH)
+          .style('stroke-width', `${FLOW_HIGHLIGHT_WIDTH}px`)
       }
     })
   }, [highlightedNodeId, treeData])
