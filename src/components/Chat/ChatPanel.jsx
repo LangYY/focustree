@@ -124,24 +124,25 @@ function MessageContent({ content, nameToId, onHoverNode }) {
   )
 }
 
-/** 可展开的「为什么这样推荐」卡片 */
+/**
+ * 可展开的「为什么这样推荐」卡片
+ *
+ * 注：thinking 里还有 situation_map / assumptions / goal_usage_mode / preserved_inputs /
+ * merged_duplicates / user_goal / traps_avoided / leverage_insight / success_criterion 等字段，
+ * 是给模型自己用的推理脚手架（防遗漏、方便校验），故意不在这里渲染——那是「审计口径」，
+ * 不是用户想读的内容。这里只挑对用户真正有决策价值的几项，保持这张卡片是「读得懂的结论」，
+ * 不是「内部记录」。
+ */
 function ThinkingCard({ thinking }) {
   const [open, setOpen] = useState(false)
   if (!thinking || typeof thinking !== 'object') return null
   const {
-    brief_rationale, situation_map, assumptions, open_questions, proposed_panel_changes,
-    goal_usage_mode, goal_usage_reason,
-    preserved_inputs, merged_duplicates, deferred_or_unsure,
-    user_goal, tradeoff_analysis, traps_avoided, leverage_insight,
-    next_concrete_step, success_criterion, risk_if_skipped,
+    brief_rationale, open_questions, proposed_panel_changes, deferred_or_unsure,
+    tradeoff_analysis, next_concrete_step, risk_if_skipped,
   } = thinking
-  const hasStructuring = brief_rationale || situation_map?.length ||
-                         assumptions?.length || open_questions?.length ||
-                         proposed_panel_changes?.length ||
-                         goal_usage_mode || goal_usage_reason || preserved_inputs?.length ||
-                         merged_duplicates?.length || deferred_or_unsure?.length
-  const hasContent = hasStructuring || user_goal || tradeoff_analysis || traps_avoided?.length ||
-                     leverage_insight || next_concrete_step || success_criterion || risk_if_skipped
+  const hasStructuring = proposed_panel_changes?.length || deferred_or_unsure?.length
+  const hasContent = hasStructuring || brief_rationale || open_questions?.length ||
+                     tradeoff_analysis || next_concrete_step || risk_if_skipped
   if (!hasContent) return null
 
   return (
@@ -157,59 +158,20 @@ function ThinkingCard({ thinking }) {
           {brief_rationale && (
             <Row label="判断" value={brief_rationale} valueColor="text-gray-300" multi />
           )}
-          {Array.isArray(situation_map) && situation_map.length > 0 && (
-            <ListRow label="局面" items={situation_map} valueColor="text-gray-300" />
-          )}
           {Array.isArray(proposed_panel_changes) && proposed_panel_changes.length > 0 && (
             <ListRow label="面板建议" items={proposed_panel_changes} valueColor="text-blue-300" />
-          )}
-          {(goal_usage_mode || goal_usage_reason) && (
-            <Row
-              label="目标使用"
-              value={`${goalUsageLabel(goal_usage_mode)}${goal_usage_reason ? `：${goal_usage_reason}` : ''}`}
-              valueColor="text-gray-300"
-              multi
-            />
-          )}
-          {Array.isArray(assumptions) && assumptions.length > 0 && (
-            <ListRow label="假设" items={assumptions} valueColor="text-gray-400" />
           )}
           {Array.isArray(open_questions) && open_questions.length > 0 && (
             <ListRow label="待确认" items={open_questions} valueColor="text-amber-300" />
           )}
-          {Array.isArray(preserved_inputs) && preserved_inputs.length > 0 && (
-            <ListRow label="保留" items={preserved_inputs} valueColor="text-emerald-300" />
-          )}
-          {Array.isArray(merged_duplicates) && merged_duplicates.length > 0 && (
-            <ListRow label="合并" items={merged_duplicates} valueColor="text-blue-300" />
-          )}
           {Array.isArray(deferred_or_unsure) && deferred_or_unsure.length > 0 && (
             <ListRow label="暂缓" items={deferred_or_unsure} valueColor="text-amber-300" />
-          )}
-          {user_goal && (
-            <Row label="目标" value={user_goal} valueColor="text-gray-300" />
-          )}
-          {next_concrete_step && (
-            <Row label="下一步" value={next_concrete_step} valueColor="text-blue-300" emphasis />
-          )}
-          {success_criterion && (
-            <Row label="完成标准" value={success_criterion} valueColor="text-gray-300" />
           )}
           {tradeoff_analysis && (
             <Row label="权衡" value={tradeoff_analysis} valueColor="text-gray-300" multi />
           )}
-          {Array.isArray(traps_avoided) && traps_avoided.length > 0 && (
-            <div>
-              <div className="text-gray-500 mb-0.5">规避陷阱</div>
-              <ul className="space-y-0.5 pl-1">
-                {traps_avoided.map((t, i) => (
-                  <li key={i} className="text-amber-300">· {t}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {leverage_insight && (
-            <Row label="杠杆点" value={leverage_insight} valueColor="text-emerald-300" />
+          {next_concrete_step && (
+            <Row label="下一步" value={next_concrete_step} valueColor="text-blue-300" emphasis />
           )}
           {risk_if_skipped && (
             <Row label="不做的代价" value={risk_if_skipped} valueColor="text-rose-300" />
@@ -218,13 +180,6 @@ function ThinkingCard({ thinking }) {
       )}
     </div>
   )
-}
-
-function goalUsageLabel(mode) {
-  if (mode === 'priority_filter') return '用于排序'
-  if (mode === 'ignored') return '本轮不使用'
-  if (mode === 'background') return '仅作背景'
-  return mode || '未标注'
 }
 
 function DraftPlanCard({ thinking, applied, onApply }) {
