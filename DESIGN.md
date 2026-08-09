@@ -479,6 +479,10 @@ rings = clamp(round(c * 4), 1, 4)
 
 节点 hover 或选中时，年轮 opacity 统一 ×2.2，让用户能读出圈数。
 
+**晨纸主题校对（实测）**：浅色画布上的辉光不使用分支色亮晕。`node-direct-glow` 改用 `--ft-text-primary` 暗晕，`stdDeviation = 3.5`、半径仍按 `r × 1.9..3.2`，opacity 乘以 `0.58`，最终范围约 `0.06..0.26`；年轮改用 `--ft-text-secondary` 描边，opacity 乘以 `1.65` 并封顶 `0.85`。这样 direct 的分支色仍由节点本体表达，暗晕只表达强度，不会在米白底上泛白。
+
+对 `--ft-surface` 的实际对比度（相对 luminance ratio）为：林夜 `text-primary 14.72:1 / secondary 7.86:1 / tertiary 4.06:1`；晨纸 `text-primary 14.16:1 / secondary 5.90:1 / tertiary 3.03:1`。分支色对各自画布的最低实测值为林夜 `4.33:1`、晨纸 `4.02:1`，均高于本节要求。
+
 ### 7.2 状态叠加（非分数）
 
 #### 期限弧
@@ -772,7 +776,7 @@ src/
 本次是纯前端表现层重做。以下**不允许改动**：
 
 - `server/` 下任何文件
-- `src/lib/priorityEngine.js` 的计算逻辑与输出字段
+- `src/lib/priorityEngine.js` 的计算逻辑与既有计算结果（仅允许增加解释性输出字段，不改变现有结果）
 - `src/lib/priorityAnalysis.js`、`src/lib/intentClassifier.js`
 - `src/hooks/` 下各 hook 的对外接口（内部可重构，但签名保持）
 - 数据库结构与 `src/lib/supabase.js`

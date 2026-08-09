@@ -1,5 +1,10 @@
 # 阿里云 ECS 部署 FocusTree
 
+> **注意：这不是当前生产环境的形态。**
+> `focus.buzzegg.cn` 实际跑的是 systemd + Nginx，机器上没有装 Docker。
+> 当前的真实部署方式见 [DEPLOY.md §4.1](../../DEPLOY.md)。
+> 本文描述的 Docker Compose 方案目前没有在用。
+
 这套部署使用 Docker Compose：
 
 - `app`：FocusTree Node 服务，监听容器内 `3001`

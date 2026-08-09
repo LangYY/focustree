@@ -374,11 +374,16 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     const thinking = sourceMsg?.thinking
     if (!thinking || !treeActions) return false
 
-    const draftActions = sourceMsg.applied_draft_actions ? [] : thinking.draft_actions
+    const draftActions = sourceMsg.applied_draft_actions ? [] : [
+      ...(Array.isArray(thinking.draft_actions) ? thinking.draft_actions : []),
+      ...(Array.isArray(thinking.proposed_panel_changes) ? thinking.proposed_panel_changes : []),
+    ]
     const draftResult = await executeDraftActionsSafely(draftActions, treeActions, treeData)
-    const priorityResult = sourceMsg.applied_priority_analysis
-      ? { status: 'none' }
-      : await applyPriorityProposalSafely(thinking, treeActions, treeData, userGoal)
+    const pendingGoal = isGoalAnalysisPending(sourceMsg) ? thinking.goal_analysis : null
+    const pendingProposals = sourceMsg.applied_priority_analysis ? [] : thinking.node_priority_proposals
+    const priorityResult = (pendingGoal || pendingProposals?.length)
+      ? await applyPriorityProposalSafely({ ...thinking, goal_analysis: pendingGoal, node_priority_proposals: pendingProposals }, treeActions, treeData, userGoal)
+      : { status: 'none' }
 
     const replyParts = []
     if (draftResult.attempted) {
@@ -403,7 +408,8 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       ...prev.map(m => m.id === sourceMsg.id ? {
         ...m,
         applied_draft_actions: draftResult.attempted ? true : m.applied_draft_actions,
-        applied_priority_analysis: priorityResult.status === 'applied' ? true : m.applied_priority_analysis,
+        applied_goal_analysis: pendingGoal && priorityResult.status === 'applied' ? true : m.applied_goal_analysis,
+        applied_priority_analysis: pendingProposals?.length && priorityResult.status === 'applied' ? true : m.applied_priority_analysis,
       } : m),
       assistantMsg,
     ])
@@ -429,13 +435,19 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
     return true
   }, [treeActions, user, userGoal])
 
-  const applyDraftPlan = useCallback(async (messageId, treeData) => {
+  const applyDraftPlan = useCallback(async (messageId, treeData, actionOverrides) => {
     if (!messageId || !treeActions) return
     const sourceMsg = messages.find(m => m.id === messageId)
     const thinking = sourceMsg?.thinking
-    if (!sourceMsg || sourceMsg.applied_draft_actions || !Array.isArray(thinking?.draft_actions) || !thinking.draft_actions.length) return
+    const draftActions = Array.isArray(actionOverrides)
+      ? actionOverrides
+      : [
+          ...(Array.isArray(thinking?.draft_actions) ? thinking.draft_actions : []),
+          ...(Array.isArray(thinking?.proposed_panel_changes) ? thinking.proposed_panel_changes : []),
+        ]
+    if (!sourceMsg || sourceMsg.applied_draft_actions || !draftActions.length) return
 
-    const draftResult = await executeDraftActionsSafely(thinking.draft_actions, treeActions, treeData)
+    const draftResult = await executeDraftActionsSafely(draftActions, treeActions, treeData)
     const content = draftResult.createdCount > 0
       ? `已按这套结构草案应用到面板：创建/更新 ${draftResult.createdCount} 个节点。`
       : '这套结构草案里的节点已经在面板里，我没有重复创建。'
@@ -791,20 +803,32 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
   /** Apply a reviewed goal/priority analysis from an assistant message. */
   const applyPriorityAnalysis = useCallback(async (messageId, overrides, treeData) => {
     if (!treeActions || !messageId) return
+    const scope = overrides?.scope || 'all'
     const msg = messages.find(m => m.id === messageId)
-    if (!msg || msg.applied_priority_analysis) return
+    if (!msg) return
+    if (scope === 'goal' && msg.applied_goal_analysis) return
+    if (scope === 'priority' && msg.applied_priority_analysis) return
+    if (scope === 'all' && msg.applied_priority_analysis && !isGoalAnalysisPending(msg)) return
     const thinking = {
       ...msg.thinking,
-      goal_analysis: overrides?.goal_analysis ?? msg.thinking?.goal_analysis,
-      node_priority_proposals: overrides?.node_priority_proposals ?? msg.thinking?.node_priority_proposals,
+      goal_analysis: scope === 'priority' ? null : overrides?.goal_analysis ?? msg.thinking?.goal_analysis,
+      node_priority_proposals: scope === 'goal' ? [] : overrides?.node_priority_proposals ?? msg.thinking?.node_priority_proposals,
     }
     const result = await applyPriorityProposalSafely(thinking, treeActions, treeData, userGoal)
-    if (result.status === 'none') return
+    if (result.status === 'none') return result
     const content = result.status === 'applied'
       ? `已确认目标与优先级分析，更新 ${result.appliedCount} 个节点。`
       : `有些分析无法对应到现有节点：${result.names.join('、')}。`
     setMessages(prev => [
-      ...prev.map(m => m.id === messageId ? { ...m, applied_priority_analysis: result.status === 'applied' } : m),
+      ...prev.map(m => {
+        if (m.id !== messageId) return m
+        if (result.status !== 'applied') return m
+        return {
+          ...m,
+          applied_goal_analysis: scope === 'goal' || (scope === 'all' && Boolean(thinking.goal_analysis)) ? true : m.applied_goal_analysis ?? false,
+          applied_priority_analysis: scope === 'priority' || (scope === 'all' && thinking.node_priority_proposals?.length) ? true : m.applied_priority_analysis ?? false,
+        }
+      }),
       { id: uuid(), role: 'assistant', content, kind: 'local' },
     ])
     if (user && sessionId) {
@@ -823,6 +847,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         confirmed_at: result.status === 'applied' ? new Date().toISOString() : null,
       })
     }
+    return result
   }, [messages, treeActions, user, sessionId, userGoal])
 
   /** Request semantic signals only; final scores remain local and require confirmation. */
@@ -1132,13 +1157,14 @@ function findLatestConfirmableMessage(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg?.role !== 'assistant' || !msg.thinking) continue
-    const hasDraft = Array.isArray(msg.thinking.draft_actions) &&
-      msg.thinking.draft_actions.length > 0 &&
-      !msg.applied_draft_actions
+    const hasDraft = !msg.applied_draft_actions && (
+      (Array.isArray(msg.thinking.draft_actions) && msg.thinking.draft_actions.length > 0) ||
+      (Array.isArray(msg.thinking.proposed_panel_changes) && msg.thinking.proposed_panel_changes.length > 0)
+    )
     const hasPriorityAnalysis = (
-      msg.thinking.goal_analysis ||
-      (Array.isArray(msg.thinking.node_priority_proposals) && msg.thinking.node_priority_proposals.length > 0)
-    ) && !msg.applied_priority_analysis
+      (isGoalAnalysisPending(msg) && msg.thinking.goal_analysis) ||
+      (!msg.applied_priority_analysis && Array.isArray(msg.thinking.node_priority_proposals) && msg.thinking.node_priority_proposals.length > 0)
+    )
     if (hasDraft || hasPriorityAnalysis) return msg
   }
   return null
@@ -1205,6 +1231,12 @@ async function applyPriorityProposalSafely(thinking, treeActions, treeData, curr
 
   if (result.missing?.length) return { status: 'missing', names: result.missing }
   return { status: 'applied', appliedCount: result.applied || 0, goal }
+}
+
+function isGoalAnalysisPending(message) {
+  if (!message?.thinking?.goal_analysis) return false
+  if (message.applied_goal_analysis) return false
+  return 'applied_goal_analysis' in message || !message.applied_priority_analysis
 }
 
 function createTreeIndex(treeData) {

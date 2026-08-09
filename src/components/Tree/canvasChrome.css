@@ -59,9 +59,12 @@
 @keyframes ft-float-in { from { opacity: 0; transform: translateY(-5px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .ft-canvas-stage { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--ft-canvas); }
 .ft-tree-svg { display: block; width: 100%; height: 100%; background: var(--ft-canvas); }
+.ft-tree-svg:focus-visible { outline: 2px solid var(--ft-accent); outline-offset: 2px; }
 .ft-inline-edit { position: fixed; z-index: 1100; padding: 5px 8px; border: 1px solid var(--ft-accent); border-radius: var(--ft-radius-sm); outline: 0; background: var(--ft-surface-raised); box-shadow: var(--ft-shadow-md); color: var(--ft-text-primary); font-size: var(--ft-text-sm); }
 .node-main-circle { transition: r var(--ft-dur-3) var(--ft-ease-grow), opacity var(--ft-dur-2) var(--ft-ease-out); }
 .node-direct-glow { pointer-events: none; }
+.priority-change-pulse { vector-effect: non-scaling-stroke; }
+.ft-tree-exit-layer { opacity: 1; }
 .node-score-label { letter-spacing: .01em; }
 .node-due-marker path { animation: ft-due-pulse 1.6s ease-in-out infinite; }
 @keyframes ft-due-pulse { 0%, 100% { opacity: .58; } 50% { opacity: 1; } }

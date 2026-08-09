@@ -1,0 +1,43 @@
+.ft-modal-panel { background: var(--ft-surface-raised); border-color: var(--ft-border); color: var(--ft-text-primary); }
+.ft-modal-border { border-color: var(--ft-border); }
+.ft-modal-border-subtle { border-color: var(--ft-border-subtle); }
+.ft-modal-border-strong { border-color: var(--ft-border-strong); }
+.ft-modal-text-primary { color: var(--ft-text-primary); }
+.ft-modal-text-secondary { color: var(--ft-text-secondary); }
+.ft-modal-text-tertiary { color: var(--ft-text-tertiary); }
+.ft-modal-text-faint { color: var(--ft-text-tertiary); opacity: .72; }
+.ft-modal-text-inverse { color: var(--ft-text-inverse); }
+.ft-modal-text-warn { color: var(--ft-warn); }
+.ft-modal-text-accent { color: var(--ft-accent); }
+.ft-modal-text-danger { color: var(--ft-danger); }
+.ft-modal-text-ai { color: var(--ft-ai); }
+.ft-modal-hover-text-primary:hover { color: var(--ft-text-primary); }
+.ft-modal-hover-text-secondary:hover { color: var(--ft-text-secondary); }
+.ft-modal-hover-text-accent:hover { color: var(--ft-accent-hover); }
+.ft-modal-hover-text-danger:hover { color: var(--ft-danger); }
+.ft-modal-surface { background: var(--ft-surface); }
+.ft-modal-surface-sunken { background: var(--ft-surface-sunken); }
+.ft-modal-surface-hover { background: var(--ft-surface-hover); }
+.ft-modal-surface-base-60 { background: color-mix(in srgb, var(--ft-surface) 60%, transparent); }
+.ft-modal-surface-hover-40 { background: color-mix(in srgb, var(--ft-surface-hover) 40%, transparent); }
+.ft-modal-surface-hover-60 { background: color-mix(in srgb, var(--ft-surface-hover) 60%, transparent); }
+.ft-modal-hover-surface-50:hover { background: color-mix(in srgb, var(--ft-surface-hover) 50%, transparent); }
+.ft-modal-hover-surface-60:hover { background: color-mix(in srgb, var(--ft-surface-hover) 60%, transparent); }
+.ft-modal-bg-accent { background: var(--ft-accent); }
+.ft-modal-bg-accent-40 { background: color-mix(in srgb, var(--ft-accent) 40%, transparent); }
+.ft-modal-bg-warn-30 { background: color-mix(in srgb, var(--ft-warn) 30%, transparent); }
+.ft-modal-bg-warn-50:hover { background: color-mix(in srgb, var(--ft-warn) 50%, transparent); }
+.ft-modal-hover-bg-accent-60:hover { background: color-mix(in srgb, var(--ft-accent) 60%, transparent); }
+.ft-modal-hover-bg-warn-50:hover { background: color-mix(in srgb, var(--ft-warn) 50%, transparent); }
+.ft-modal-border-accent-50 { border-color: color-mix(in srgb, var(--ft-accent) 50%, transparent); }
+.ft-modal-border-accent { border-color: var(--ft-accent); }
+.ft-modal-border-warn-50 { border-color: color-mix(in srgb, var(--ft-warn) 50%, transparent); }
+.ft-modal-border-warn { border-color: var(--ft-warn); }
+.ft-modal-hover-border-strong:hover { border-color: var(--ft-border-strong); }
+.ft-modal-hover-border-accent:hover { border-color: var(--ft-accent); }
+.ft-modal-field { border-color: var(--ft-border); background: var(--ft-surface-sunken); color: var(--ft-text-primary); }
+.ft-modal-field:focus { border-color: var(--ft-accent); }
+.ft-modal-primary-action { background: var(--ft-accent); color: var(--ft-text-inverse); }
+.ft-modal-primary-action:hover { background: var(--ft-accent-hover); }
+.ft-modal-primary-action:disabled { background: var(--ft-border); color: var(--ft-text-tertiary); }
+.ft-modal-color-swatch.is-selected { box-shadow: 0 0 0 2px var(--ft-text-primary), 0 0 0 4px var(--ft-surface-raised); transform: scale(1.1); }

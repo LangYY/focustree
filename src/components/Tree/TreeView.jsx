@@ -81,6 +81,47 @@ function clampNumber(value, min, max) {
   return Math.max(min, Math.min(max, numeric))
 }
 
+function motionDuration(milliseconds) {
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return 1
+  return milliseconds
+}
+
+function nodeTransform(node) {
+  return `translate(${node?.y || 0},${node?.x || 0})`
+}
+
+function treeItemDomId(nodeId) {
+  return `ft-tree-node-${String(nodeId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function nodeVisualOpacity(node) {
+  if (node?.data?.status === 'dormant') return .38
+  if (node?.data?.status === 'done') return .45
+  return node?.__visualOpacity ?? 1
+}
+
+function nodeFill(node) {
+  return node?.data?.status === 'dormant'
+    ? 'var(--ft-canvas)'
+    : node?.__displayColor || 'var(--ft-text-tertiary)'
+}
+
+function pointForNode(node) {
+  return { x: node?.x || 0, y: node?.y || 0 }
+}
+
+function layoutStart(node, previousById) {
+  const previous = previousById.get(node?.data?.id)
+  if (previous) return previous
+  return previousById.get(node?.parent?.data?.id) || node?.parent || node
+}
+
+function linkStart(link, previousById) {
+  const source = previousById.get(link?.source?.data?.id) || link?.source
+  const target = previousById.get(link?.target?.data?.id) || source || link?.target
+  return { source: pointForNode(source), target: pointForNode(target) }
+}
+
 function isVisibleDueState(dueState) {
   return dueState && ['overdue', 'today', 'three_days', 'week'].includes(dueState.state)
 }
@@ -93,6 +134,10 @@ function assignBranchVisuals(root, theme) {
     node.__branchBaseColor = baseColor
     node.__branchDepth = branchDepth
     node.__displayColor = shadeBranchColor(baseColor, branchDepth, node.data.status, theme)
+    node.__glowColor = theme === 'light' ? 'var(--ft-text-primary)' : node.__displayColor
+    node.__glowOpacityScale = theme === 'light' ? .58 : 1
+    node.__ringStroke = theme === 'light' ? 'var(--ft-text-secondary)' : node.__displayColor
+    node.__ringOpacityScale = theme === 'light' ? 1.65 : 1
     node.__visualOpacity = node.data.status === 'done' ? 0.58 : node.data.status === 'dormant' ? 0.46 : 1
     node.__dueState = dueState
     node.__dueVisible = isVisibleDueState(dueState)
@@ -306,6 +351,56 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     onContextAction?.(action, payload)
   }, [onContextAction, startInlineRename])
 
+  const handleTreeKeyDown = useCallback((event) => {
+    if (isTypingTarget(event.target) || event.defaultPrevented) return
+    const root = rootRef.current
+    if (!root) return
+
+    if (event.key === 'Escape') {
+      setContextMenu(null)
+      setTooltip(null)
+      return
+    }
+
+    const visibleNodes = root.descendants().filter(node => node.data.type !== 'root')
+    const current = visibleNodes.find(node => node.data.id === highlightedNodeId) || visibleNodes[0]
+    if (!current) return
+
+    const siblings = current.parent?.children?.filter(node => node.data.type !== 'root') || []
+    let next = null
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      const index = siblings.indexOf(current)
+      if (index >= 0 && siblings.length > 1) {
+        next = siblings[(index + (event.key === 'ArrowUp' ? -1 : 1) + siblings.length) % siblings.length]
+      }
+    } else if (event.key === 'ArrowLeft') {
+      next = current.parent?.data?.type === 'root' ? null : current.parent
+    } else if (event.key === 'ArrowRight') {
+      next = current.children?.find(node => node.data.type !== 'root') || null
+    }
+
+    if (next?.data?.type !== 'root') {
+      event.preventDefault()
+      onNodeSelectRef.current?.(withDerivedWeightMeta(next))
+      return
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onNodeToggleRef.current?.(current.data)
+      return
+    }
+    if (event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault()
+      onNodeSelectRef.current?.(withDerivedWeightMeta(current))
+      return
+    }
+    if (event.key === 'Delete') {
+      event.preventDefault()
+      onContextAction?.('delete', { node: withDerivedWeightMeta(current) })
+    }
+  }, [highlightedNodeId, onContextAction])
+
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (isTypingTarget(event.target) || event.defaultPrevented) return
@@ -327,6 +422,8 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     }
 
     const height = svgRef.current.clientHeight
+    const previousRoot = rootRef.current
+    const previousById = new Map(previousRoot?.descendants().map(node => [node.data.id, node]) || [])
 
     const root = d3.hierarchy(treeData, d => d.expanded === false ? null : d.children)
     assignCumulativeFlow(root, userGoal)
@@ -351,6 +448,58 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     const g = d3.select(gRef.current)
     g.selectAll('*').remove()
 
+    const currentIds = new Set(nodes.map(node => node.data.id))
+    const removedNodes = previousRoot?.descendants().filter(node => node.data.type !== 'root' && !currentIds.has(node.data.id)) || []
+    const removedIds = new Set(removedNodes.map(node => node.data.id))
+    if (removedNodes.length) {
+      const exitLayer = g.append('g')
+        .attr('class', 'ft-tree-exit-layer')
+        .attr('pointer-events', 'none')
+
+      const exitLinks = previousRoot.links().filter(link => removedIds.has(link.target.data.id))
+      exitLayer.selectAll('.ft-tree-exit-link')
+        .data(exitLinks)
+        .join('path')
+        .attr('class', 'ft-tree-exit-link')
+        .attr('d', link => centerLinePath(link))
+        .attr('fill', 'none')
+        .attr('stroke', link => link.target.__displayColor || 'var(--ft-text-tertiary)')
+        .attr('stroke-width', link => branchWidth(link.target.__branchPriority))
+        .attr('stroke-linecap', 'round')
+        .attr('opacity', .5)
+        .each(function () {
+          const length = this.getTotalLength?.() || 1
+          d3.select(this).attr('stroke-dasharray', `${length} ${length}`).attr('stroke-dashoffset', 0)
+        })
+        .transition()
+        .delay(motionDuration(420))
+        .duration(motionDuration(700))
+        .ease(d3.easeCubicOut)
+        .attr('stroke-dashoffset', function () { return -(this.getTotalLength?.() || 1) })
+        .attr('opacity', 0)
+
+      exitLayer.selectAll('.ft-tree-exit-node')
+        .data(removedNodes)
+        .join('g')
+        .attr('class', 'ft-tree-exit-node')
+        .attr('transform', node => nodeTransform(node))
+        .append('circle')
+        .attr('r', node => getNodeRadius(node.data, node.__directPriority))
+        .attr('fill', node => nodeFill(node))
+        .attr('opacity', node => nodeVisualOpacity(node))
+        .transition()
+        .duration(motionDuration(420))
+        .ease(d3.easeCubicOut)
+        .attr('r', 0)
+        .attr('opacity', 0)
+
+      exitLayer.transition()
+        .delay(motionDuration(420) + motionDuration(700))
+        .duration(1)
+        .style('opacity', 0)
+        .remove()
+    }
+
     const svg = d3.select(svgRef.current)
     svg.selectAll('defs.ft-tree-defs').remove()
     const defs = svg.insert('defs', ':first-child').attr('class', 'ft-tree-defs')
@@ -358,7 +507,7 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     glow.append('feGaussianBlur').attr('stdDeviation', 3.5)
 
     // 锥形枝干：branchPriority 只通过枝干物理宽度表达。
-    g.selectAll('.link')
+    const link = g.selectAll('.link')
       .data(links)
       .join('path')
       .attr('class', 'link')
@@ -371,7 +520,30 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke', 'none')
       .attr('d', d => branchPath(d, branchWidth(d.source.__branchPriority), branchWidth(d.target.__branchPriority)))
 
-    g.selectAll('.critical-path-line')
+    // 轮廓只在生长期间出现，用 stroke-dashoffset 把填充枝干“画”出来，结束后恢复无描边。
+    link
+      .attr('stroke', d => d.target.__displayColor || 'var(--ft-text-tertiary)')
+      .attr('stroke-opacity', .22)
+      .attr('stroke-width', .6)
+      .each(function () {
+        const length = this.getTotalLength?.() || 1
+        d3.select(this).attr('stroke-dasharray', `${length} ${length}`).attr('stroke-dashoffset', length)
+      })
+      .attr('d', d => branchPath(linkStart(d, previousById), branchWidth(d.source.__branchPriority), branchWidth(d.target.__branchPriority)))
+      .transition()
+      .duration(motionDuration(700))
+      .ease(d3.easeCubicOut)
+      .attr('d', d => branchPath(d, branchWidth(d.source.__branchPriority), branchWidth(d.target.__branchPriority)))
+      .attr('stroke-dashoffset', 0)
+      .attr('stroke-opacity', 0)
+      .on('end', function () {
+        d3.select(this)
+          .attr('stroke', 'none')
+          .attr('stroke-dasharray', null)
+          .attr('stroke-dashoffset', null)
+      })
+
+    const criticalPathLine = g.selectAll('.critical-path-line')
       .data(links.filter(d => (d.target.__branchPriority || 0) >= (d.source.__branchPriority || 0)))
       .join('path')
       .attr('class', 'critical-path-line')
@@ -381,6 +553,13 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke-width', 1)
       .attr('opacity', .12)
       .attr('pointer-events', 'none')
+
+    criticalPathLine
+      .attr('d', d => centerLinePath(linkStart(d, previousById)))
+      .transition()
+      .duration(motionDuration(700))
+      .ease(d3.easeCubicOut)
+      .attr('d', d => centerLinePath(d))
 
     // 最末端枝干的透明命中区：可从枝干拉出虚线新增同级底层节点，不改变可见样式。
     g.selectAll('.terminal-branch-add-hit')
@@ -402,10 +581,14 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .join('g')
       .attr('class', 'node')
       .attr('data-node-id', d => d.data.id || '')
-      .attr('transform', d => `translate(${d.y},${d.x})`)
+      .attr('id', d => d.data.type === 'root' ? undefined : treeItemDomId(d.data.id))
+      .attr('transform', d => nodeTransform(layoutStart(d, previousById)))
       .attr('role', d => d.data.type === 'root' ? undefined : 'treeitem')
       .attr('aria-expanded', d => d.data.type === 'root' ? undefined : Boolean(d.data.expanded !== false))
       .attr('aria-selected', d => d.data.id === highlightedNodeId ? 'true' : 'false')
+      .attr('aria-level', d => d.data.type === 'root' ? undefined : d.depth)
+      .attr('aria-posinset', d => d.data.type === 'root' ? undefined : (d.parent?.children?.indexOf(d) ?? 0) + 1)
+      .attr('aria-setsize', d => d.data.type === 'root' ? undefined : d.parent?.children?.length)
       .attr('aria-label', d => d.data.type === 'root' ? '专注树根节点' : nodeAriaLabel(d.data, d))
       .style('cursor', 'pointer')
 
@@ -474,11 +657,26 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     node.filter(d => d.data.type !== 'root' && glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority))
       .append('circle')
       .attr('class', 'node-direct-glow')
-      .attr('r', d => glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority).radius)
-      .attr('fill', d => d.__displayColor || 'var(--ft-accent)')
-      .attr('opacity', d => glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority).opacity)
+      .attr('r', d => {
+        const previous = previousById.get(d.data.id)
+        const metrics = previous && glowMetrics(getNodeRadius(previous.data, previous.__directPriority), previous.__directPriority)
+        return metrics?.radius || 0
+      })
+      .attr('fill', d => d.__glowColor || d.__displayColor || 'var(--ft-accent)')
+      .attr('opacity', d => {
+        const previous = previousById.get(d.data.id)
+        const metrics = previous && glowMetrics(getNodeRadius(previous.data, previous.__directPriority), previous.__directPriority)
+        return (metrics?.opacity || 0) * (previous?.__glowOpacityScale || 1)
+      })
       .attr('filter', nodes.length > 400 ? null : 'url(#ft-glow)')
       .attr('pointer-events', 'none')
+
+    node.selectAll('.node-direct-glow')
+      .transition()
+      .duration(motionDuration(700))
+      .ease(d3.easeCubicOut)
+      .attr('r', d => glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority)?.radius || 0)
+      .attr('opacity', d => (glowMetrics(getNodeRadius(d.data, d.__directPriority), d.__directPriority)?.opacity || 0) * (d.__glowOpacityScale || 1))
 
     node.filter(d => d.data.type !== 'root' && layers?.rings !== false)
       .append('g')
@@ -488,9 +686,9 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         d3.select(this).selectAll('circle').data(rings).join('circle')
           .attr('r', ring => ring.radius)
           .attr('fill', 'none')
-          .attr('stroke', d.__displayColor || 'var(--ft-text-tertiary)')
+          .attr('stroke', d.__ringStroke || d.__displayColor || 'var(--ft-text-tertiary)')
           .attr('stroke-width', .75)
-          .attr('opacity', ring => ring.opacity)
+          .attr('opacity', ring => Math.min(.85, ring.opacity * (d.__ringOpacityScale || 1)))
           .attr('pointer-events', 'none')
       })
 
@@ -498,12 +696,20 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     node.filter(d => d.data.type !== 'root')
       .append('circle')
       .attr('class', 'node-main-circle')
-      .attr('r', d => getNodeRadius(d.data, d.__directPriority))
-      .attr('fill', d => d.data.status === 'dormant' ? 'var(--ft-canvas)' : d.__displayColor || 'var(--ft-text-tertiary)')
-      .attr('stroke', d => d.data.status === 'dormant' ? (d.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(d))
+      .attr('r', d => {
+        const previous = previousById.get(d.data.id)
+        return previous ? getNodeRadius(previous.data, previous.__directPriority) : 0
+      })
+      .attr('fill', d => previousById.has(d.data.id) ? nodeFill(previousById.get(d.data.id)) : nodeFill(d))
+      .attr('stroke', d => {
+        const previous = previousById.get(d.data.id)
+        return previous
+          ? (previous.data.status === 'dormant' ? (previous.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(previous))
+          : (d.data.status === 'dormant' ? (d.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(d))
+      })
       .attr('stroke-width', d => d.data.status === 'dormant' ? 1.5 : nodeStrokeWidth(d))
       .attr('stroke-dasharray', d => d.data.status === 'dormant' ? '2 2' : null)
-      .attr('opacity', d => d.data.status === 'dormant' ? .38 : d.data.status === 'done' ? .45 : (d.__visualOpacity ?? 1))
+      .attr('opacity', d => previousById.has(d.data.id) ? nodeVisualOpacity(previousById.get(d.data.id)) : 0)
       .attr('filter', d => d.data.status === 'done' ? null : nodeFilter(d))
       .style('cursor', 'grab')
       .on('mouseenter', function (event, d) {
@@ -511,13 +717,22 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', addDisabledRef.current ? 0 : 1)
         d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => Math.min(1, ring.opacity * 2.2))
       })
+
+    node.selectAll('.node-main-circle')
+      .transition()
+      .duration(motionDuration(420))
+      .ease(d3.easeCubicOut)
+      .attr('r', d => getNodeRadius(d.data, d.__directPriority))
+      .attr('fill', d => nodeFill(d))
+      .attr('stroke', d => d.data.status === 'dormant' ? (d.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(d))
+      .attr('opacity', d => nodeVisualOpacity(d))
       .on('mouseleave', function (event, d) {
         d3.select(this).attr('r', getNodeRadius(d.data, d.__directPriority))
         d3.select(this.parentNode).select('.node-main-plus').attr('opacity', 0)
         d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => ring.opacity)
       })
 
-    node.filter(d => d.data.status === 'done' && getNodeRadius(d.data, d.__directPriority) >= 8)
+    const doneMark = node.filter(d => d.data.status === 'done' && getNodeRadius(d.data, d.__directPriority) >= 8)
       .append('path')
       .attr('class', 'node-done-mark')
       .attr('d', 'M-4,0 L-1,3 L5,-4')
@@ -527,6 +742,20 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke-linecap', 'round')
       .attr('stroke-linejoin', 'round')
       .attr('pointer-events', 'none')
+
+    doneMark.each(function (d) {
+      const length = this.getTotalLength?.() || 15
+      const previous = previousById.get(d.data.id)
+      d3.select(this)
+        .attr('stroke-dasharray', `${length} ${length}`)
+        .attr('stroke-dashoffset', previous?.data?.status === 'done' ? 0 : length)
+    })
+    doneMark
+      .filter(d => previousById.get(d.data.id)?.data?.status !== 'done')
+      .transition()
+      .duration(motionDuration(220))
+      .ease(d3.easeCubicOut)
+      .attr('stroke-dashoffset', 0)
 
     node.filter(d => d.data.status === 'done')
       .append('text')
@@ -584,6 +813,7 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke-width', 3)
       .attr('stroke-linejoin', 'round')
       .attr('pointer-events', 'auto')
+      .attr('opacity', d => previousById.has(d.data.id) ? 1 : 0)
       .style('cursor', 'pointer')
       .on('click', (event, d) => {
         event.stopPropagation()
@@ -609,8 +839,49 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         .attr('stroke', 'var(--ft-canvas)')
         .attr('stroke-width', 3)
         .attr('pointer-events', 'none')
+        .attr('opacity', d => previousById.has(d.data.id) ? 1 : 0)
         .text(d => `d ${Math.round(d.__directPriority || 0)} · b ${Math.round(d.__branchPriority || 0)} · c ${Math.round(d.__cultivationScore || 0)}`)
     }
+
+    node.selectAll('.node-label, .node-score-label')
+      .transition()
+      .delay(motionDuration(420))
+      .duration(motionDuration(220))
+      .ease(d3.easeCubicOut)
+      .attr('opacity', 1)
+
+    node
+      .transition()
+      .duration(motionDuration(700))
+      .ease(d3.easeCubicOut)
+      .attr('transform', d => nodeTransform(d))
+
+    const changedScoreIds = new Set(nodes
+      .map(nodeItem => {
+        const previous = previousById.get(nodeItem.data.id)
+        return previous && Math.abs((nodeItem.__directPriority || 0) - (previous.__directPriority || 0)) > 0.01
+          ? { id: nodeItem.data.id, delta: Math.abs((nodeItem.__directPriority || 0) - (previous.__directPriority || 0)) }
+          : null
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.delta - a.delta)
+      .slice(0, 3)
+      .map(item => item.id))
+    node.filter(d => changedScoreIds.has(d.data.id))
+      .append('circle')
+      .attr('class', 'priority-change-pulse')
+      .attr('r', d => getNodeRadius(d.data, d.__directPriority) + 4)
+      .attr('fill', 'none')
+      .attr('stroke', 'var(--ft-accent)')
+      .attr('stroke-width', 1.5)
+      .attr('opacity', .78)
+      .attr('pointer-events', 'none')
+      .transition()
+      .duration(motionDuration(700))
+      .ease(d3.easeCubicOut)
+      .attr('r', d => getNodeRadius(d.data, d.__directPriority) + 11)
+      .attr('opacity', 0)
+      .remove()
 
     // 居中定位
     const xs = nodes.map(d => d.y)
@@ -1273,6 +1544,10 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         height="100%"
         role="tree"
         aria-label="专注树结构画布"
+        aria-activedescendant={highlightedNodeId ? treeItemDomId(highlightedNodeId) : undefined}
+        tabIndex={0}
+        focusable="true"
+        onKeyDown={handleTreeKeyDown}
         className="ft-tree-svg"
         style={{
           userSelect: 'none',

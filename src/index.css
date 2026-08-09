@@ -8,7 +8,8 @@
 @import "./components/Drawer/drawerTabs.css";
 @import "./components/Auth/auth.css";
 @import "./components/Chat/chat.css";
-@import "./styles/legacy-theme.css";
+@import "./components/Modals/modalPanels.css";
+@import "./components/Tree/treePanels.css";
 
 .node circle,
 .node path,

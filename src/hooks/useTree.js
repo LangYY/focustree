@@ -11,7 +11,7 @@ import {
   normalizeTargetCompletionDate,
   SAMPLE_DATA,
 } from '../lib/treeUtils'
-import { getGoalVersion, nodePriorityFingerprint, PRIORITY_RELATION_TYPES } from '../lib/priorityEngine'
+import { applyPriorityProposalsToTree, buildPriorityAnalysis } from '../lib/priorityProposals'
 import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
 
 const MAX_HISTORY = 30
@@ -327,9 +327,7 @@ export function useTree(user) {
 
   const applyPriorityAnalyses = useCallback(async (proposals, goal) => {
     if (!user || !Array.isArray(proposals) || proposals.length === 0) return { applied: 0, missing: [] }
-    const goalVersion = getGoalVersion(goal)
     const rows = []
-    const localUpdates = []
     const missing = []
 
     for (const proposal of proposals) {
@@ -339,36 +337,14 @@ export function useTree(user) {
         missing.push(proposal.name || nodeId || '未命名节点')
         continue
       }
-      const relationType = PRIORITY_RELATION_TYPES.includes(proposal.relation_type)
-        ? proposal.relation_type
-        : 'normal'
-      const priorityAnalysis = {
-        goal_alignment: clampUnit(proposal.goal_alignment),
-        necessity: clampUnit(proposal.necessity),
-        delay_cost: clampUnit(proposal.delay_cost),
-        relation_type: relationType,
-        confidence: clampUnit(proposal.confidence ?? 0.5),
-        reason: String(proposal.reason || '').trim() || null,
-        goal_version: goalVersion,
-        node_fingerprint: nodePriorityFingerprint(node),
-        confirmed: true,
-        confirmed_at: new Date().toISOString(),
-        algorithm_version: 'priority-v2',
-      }
+      const priorityAnalysis = buildPriorityAnalysis(node, proposal, goal)
       rows.push({ node_id: node.id, user_id: user.id, priority_analysis: priorityAnalysis })
-      localUpdates.push({ nodeId: node.id, priorityAnalysis })
     }
 
     if (rows.length) {
       const { error } = await supabase.from('node_annotations').upsert(rows, { onConflict: 'node_id' })
       if (error) throw error
-      setTreeData(prev => {
-        let next = prev
-        for (const item of localUpdates) {
-          next = updateNodeAnnotationInTree(next, item.nodeId, { priority_analysis: item.priorityAnalysis })
-        }
-        return next
-      })
+      setTreeData(prev => prev ? applyPriorityProposalsToTree(prev, proposals, goal) : prev)
     }
     return { applied: rows.length, missing }
   }, [treeData, user])
@@ -775,12 +751,6 @@ export function useTree(user) {
     undo,
     redo,
   }
-}
-
-function clampUnit(value) {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return 0
-  return Math.max(0, Math.min(1, numeric))
 }
 
 // ── 本地树操作 ────────────────────────────────────────

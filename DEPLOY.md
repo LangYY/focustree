@@ -87,19 +87,38 @@ http://127.0.0.1:3001
 
 云端访问时使用平台分配的 HTTPS 域名。
 
-## 4.1 阿里云 ECS
+## 4.1 阿里云 ECS（当前生产环境）
 
-如果使用已有 ECS，推荐走 `deploy/ecs`：
+`focus.buzzegg.cn` 跑在阿里云 ECS 上。实际形态是 **systemd + Nginx**，不是 Docker：
+
+| | |
+| --- | --- |
+| 目录 | `/opt/focustree`（git 仓库） |
+| 服务 | `focustree.service`，`ExecStart=/usr/local/bin/node /opt/focustree/server/index.js` |
+| 环境变量 | `/opt/focustree/.env`，由 systemd 的 `EnvironmentFile` 加载 |
+| 反向代理 | Nginx，`/etc/nginx/sites-available/focustree`，`focus.buzzegg.cn` → `127.0.0.1:3001` |
+| Node | v22 |
+
+### 不要在 ECS 上执行构建
+
+这台机器是 **2 核 / 1.6 GB**，除 FocusTree 外还跑着 MariaDB 和另外 5 个 Node 应用，空闲内存不到 900 MB。
+而 `npm run build` 要打包 2442 个模块，峰值内存几百 MB 到 1 GB，**在这台机器上跑有把其他服务一起 OOM 掉的风险**。
+
+构建产物只有约 750 KB，且与构建机器无关。所以：**在本机构建，只上传产物。**
+
+### 部署
 
 ```bash
-cd deploy/ecs
-cp .env.example .env
-# 填写域名、Supabase、DeepSeek 等配置
-./bootstrap-docker.sh
-./deploy.sh
+scripts/deploy-ecs.sh              # 只更新前端，零停机，不重启服务
+scripts/deploy-ecs.sh --full       # 同时更新 server/ 代码、装生产依赖、重启服务
+scripts/deploy-ecs.sh --dry-run    # 只上传不切换，用于验证通道
 ```
 
-详细步骤见 [deploy/ecs/README.md](./deploy/ecs/README.md)。
+脚本的动作是：本机 `npm run build` → 打包上传到 `dist.new/` → 原子切换 → 校验 `/health` → 失败时保留 `dist.old/` 供回滚。
+
+因为 `server/index.js` 用的是 `express.static(DIST_DIR)`，每次请求才读磁盘，所以**换掉 `dist/` 即刻生效，前端更新不需要重启 Node**。只有 `server/` 下的代码变了才需要 `--full`。
+
+服务器上安装依赖时用 `npm ci --omit=dev`：vite、tailwind、eslint 等构建工具都在 `devDependencies` 里，生产环境完全不需要。
 
 ## 5. 部署后验收
 

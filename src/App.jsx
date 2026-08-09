@@ -41,9 +41,11 @@ export default function App() {
   const [priorityCalculationVersion, setPriorityCalculationVersion] = useState(() => Date.now())
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
   const [selectedNodeId, setSelectedNodeId] = useState(null)
+  const [inboxFocusId, setInboxFocusId] = useState(null)
   const [layers, setLayers] = useState(() => readLayers())
   const [themeMode, setThemeMode] = useState(() => localStorage.getItem('ft_theme') || 'dark')
   const [resolvedTheme, setResolvedTheme] = useState(() => localStorage.getItem('ft_theme') === 'light' ? 'light' : 'dark')
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const resetZoomRef = useRef(null)
   const backupRef = useRef(null)
   const userPinnedTabRef = useRef(false)
@@ -170,6 +172,11 @@ export default function App() {
     setDrawerTab(tab)
   }, [])
 
+  const openInbox = useCallback(messageId => {
+    setInboxFocusId(messageId || null)
+    selectDrawerTab('inbox')
+  }, [selectDrawerTab])
+
   const closeUtilityTab = useCallback(kind => {
     setTemporaryTabs(current => current.filter(tab => tab.value !== kind))
     setDrawerTab(current => current === kind ? 'chat' : current)
@@ -237,6 +244,17 @@ export default function App() {
       if (isTypingTarget(event.target) || event.defaultPrevented || authLoading || !user) return
       const key = event.key.toLowerCase()
       const mod = event.ctrlKey || event.metaKey
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setShortcutsOpen(false)
+        if (drawerTab) setDrawerTab(null)
+        return
+      }
+      if (event.key === '?') {
+        event.preventDefault()
+        setShortcutsOpen(value => !value)
+        return
+      }
       if (mod && key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
       if (mod && key === 'y') { event.preventDefault(); redo(); return }
       if (event.key === 'delete' || event.key === 'backspace') { if (selectedNode) { event.preventDefault(); deleteSelectedNode() } return }
@@ -248,7 +266,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [authLoading, deleteSelectedNode, redo, selectDrawerTab, selectedNode, undo, user])
+  }, [authLoading, deleteSelectedNode, drawerTab, redo, selectDrawerTab, selectedNode, undo, user])
 
   const handleDropBranch = useCallback(async (source, target, drop) => {
     if (drop?.mode === 'reorder') await reorderNode(source.id, target.id, drop.placement)
@@ -262,16 +280,17 @@ export default function App() {
 
   const handleSignOut = useCallback(() => supabase.auth.signOut(), [])
   const handleApplyPriority = useCallback(async (...args) => {
-    await applyPriorityAnalysis(...args)
+    const result = await applyPriorityAnalysis(...args)
     setPriorityCalculationVersion(Date.now())
+    return result
   }, [applyPriorityAnalysis])
 
   if (authLoading) return <div className="ft-auth-loading"><span className="ft-loading-line" />载入中…</div>
   if (!user) return <AuthPage />
 
   const renderDrawerTab = tab => {
-    if (tab === 'chat') return <ChatPanel isOpen messages={messages} isLoading={chatLoading} onSend={text => sendMessage(text, treeData, { selectedNodeId })} goalText={goalText} goalExpired={goalExpired} onSetGoal={setGoal} onClearGoal={clearGoal} model={model} onModelChange={handleModelChange} onResetConversation={resetConversation} onOpenHistory={() => openUtilityTab('history')} onOpenLearned={() => openUtilityTab('memory')} onOpenRecommendations={() => { reloadRecommendations(); openUtilityTab('recommendations') }} hitRate={hitRate} treeData={treeData} onHoverNode={setHighlightedNodeId} onSelectNode={handleNodeSelect} onTriggerReview={() => weeklyReview.generate({ silent: false })} reviewGenerating={weeklyReview.generating} onRetry={() => retryLastMessage(treeData, { selectedNodeId })} onCancel={cancelRequest} onApplyDraftPlan={messageId => applyDraftPlan(messageId, treeData)} onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)} pendingCount={pendingQueue.length} />
-    if (tab === 'inbox') return <InboxTab messages={messages} treeData={treeData} userGoal={goal} onApplyDraftPlan={messageId => applyDraftPlan(messageId, treeData)} onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)} onSelectNode={handleNodeSelect} />
+    if (tab === 'chat') return <ChatPanel isOpen messages={messages} isLoading={chatLoading} onSend={text => sendMessage(text, treeData, { selectedNodeId })} goalText={goalText} goalExpired={goalExpired} onSetGoal={setGoal} onClearGoal={clearGoal} model={model} onModelChange={handleModelChange} onResetConversation={resetConversation} onOpenHistory={() => openUtilityTab('history')} onOpenLearned={() => openUtilityTab('memory')} onOpenRecommendations={() => { reloadRecommendations(); openUtilityTab('recommendations') }} onOpenInbox={openInbox} hitRate={hitRate} treeData={treeData} onHoverNode={setHighlightedNodeId} onSelectNode={handleNodeSelect} onTriggerReview={() => weeklyReview.generate({ silent: false })} reviewGenerating={weeklyReview.generating} onRetry={() => retryLastMessage(treeData, { selectedNodeId })} onCancel={cancelRequest} pendingCount={pendingQueue.length} />
+    if (tab === 'inbox') return <InboxTab messages={messages} treeData={treeData} userGoal={goal} onApplyDraftPlan={(messageId, actions) => applyDraftPlan(messageId, treeData, actions)} onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)} onSelectNode={handleNodeSelect} focusId={inboxFocusId} onFocusHandled={() => setInboxFocusId(null)} />
     if (tab === 'detail') return <NodeDetailPanel key={selectedNode?.id || 'empty'} node={selectedNode} onClose={() => selectDrawerTab('chat')} onRenameNode={renameNode} onUpdateDetails={updateNodeDetails} onUpdatePlanning={updateNodePlanning} onStatusChange={updateStatus} />
     if (tab === 'audit') return <AuditTab treeData={treeData} goal={goal} selectedNode={selectedNode} onSelectNode={handleNodeSelect} onRequestAnalysis={options => requestPriorityAnalysis(treeData, options)} analysisLoading={chatLoading} onRecalculate={() => setPriorityCalculationVersion(Date.now())} />
     if (['memory', 'recommendations', 'history', 'backup'].includes(tab)) return <UtilityTab kind={tab} learnedPatterns={learnedPatterns} recommendations={recommendations} sessions={sessions} backup={backup} onClose={() => closeUtilityTab(tab)} />
@@ -279,38 +298,64 @@ export default function App() {
   }
 
   return (
-    <AppShell
-      mode={mode}
-      onModeChange={next => { setMode(next); if (next !== 'tree') userPinnedTabRef.current = true }}
-      drawerTab={drawerTab}
-      onDrawerTab={tab => tab ? selectDrawerTab(tab) : setDrawerTab(null)}
-      onDrawerClose={() => setDrawerTab(null)}
-      renderDrawerTab={renderDrawerTab}
-      goal={goal}
-      goalText={goalText}
-      goalExpired={goalExpired}
-      onEditGoal={handleGoalEdit}
-      user={user}
-      canUndo={canUndo}
-      canRedo={canRedo}
-      lastAction={lastAction}
-      nextAction={nextAction}
-      onUndo={undo}
-      onRedo={redo}
-      onOpenTab={kind => kind === 'account' ? openUtilityTab('memory') : openUtilityTab(kind)}
-      backupWarning={backupWarning}
-      themeMode={themeMode}
-      onThemeChange={setThemeMode}
-      onSignOut={handleSignOut}
-      hasSelection={Boolean(selectedNode)}
-      pendingCount={pendingCount}
-      temporaryTabs={temporaryTabs}
-    >
-      {mode === 'tree' ? <CanvasStage theme={resolvedTheme} treeData={treeData} treeLoading={treeLoading} dailyFocus={dailyFocus} onNodeSelect={handleNodeSelect} onNodeToggle={node => toggleNode(node.id)} onContextAction={handleContextAction} resetZoomRef={resetZoomRef} highlightedNodeId={highlightedNodeId} onLeafAdd={createDefaultNode} onDropBranch={handleDropBranch} onRenameNode={renameNode} priorityCalculationVersion={priorityCalculationVersion} density={density} onDensityChange={setDensity} onExpandAll={expandAll} onCollapseAll={collapseAll} onExample={handlePrefill} userGoal={goal} layers={layers} onLayerChange={(key, value) => setLayers(current => ({ ...current, [key]: value }))} /> : null}
-      {mode === 'focus' ? <FocusView focus={dailyFocus.focus} generating={dailyFocus.generating} onGenerate={dailyFocus.generate} onToggle={dailyFocus.toggleTask} onGoTree={() => setMode('tree')} /> : null}
-      {mode === 'list' ? <ListView treeData={treeData} userGoal={goal} onStatusChange={updateStatus} onSelect={handleNodeSelect} /> : null}
-      {mode === 'review' ? <ReviewView review={weeklyReview.latestReview} history={weeklyReview.history} generating={weeklyReview.generating} onGenerate={() => weeklyReview.generate({ silent: false })} /> : null}
-    </AppShell>
+    <>
+      <AppShell
+        mode={mode}
+        onModeChange={next => { setMode(next); if (next !== 'tree') userPinnedTabRef.current = true }}
+        drawerTab={drawerTab}
+        onDrawerTab={tab => tab ? selectDrawerTab(tab) : setDrawerTab(null)}
+        onDrawerClose={() => setDrawerTab(null)}
+        renderDrawerTab={renderDrawerTab}
+        goal={goal}
+        goalText={goalText}
+        goalExpired={goalExpired}
+        onEditGoal={handleGoalEdit}
+        user={user}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        lastAction={lastAction}
+        nextAction={nextAction}
+        onUndo={undo}
+        onRedo={redo}
+        onOpenTab={kind => kind === 'account' ? openUtilityTab('memory') : openUtilityTab(kind)}
+        backupWarning={backupWarning}
+        themeMode={themeMode}
+        onThemeChange={setThemeMode}
+        onSignOut={handleSignOut}
+        hasSelection={Boolean(selectedNode)}
+        pendingCount={pendingCount}
+        temporaryTabs={temporaryTabs}
+      >
+        {mode === 'tree' ? <CanvasStage theme={resolvedTheme} treeData={treeData} treeLoading={treeLoading} dailyFocus={dailyFocus} onNodeSelect={handleNodeSelect} onNodeToggle={node => toggleNode(node.id)} onContextAction={handleContextAction} resetZoomRef={resetZoomRef} highlightedNodeId={highlightedNodeId} onLeafAdd={createDefaultNode} onDropBranch={handleDropBranch} onRenameNode={renameNode} priorityCalculationVersion={priorityCalculationVersion} density={density} onDensityChange={setDensity} onExpandAll={expandAll} onCollapseAll={collapseAll} onExample={handlePrefill} userGoal={goal} layers={layers} onLayerChange={(key, value) => setLayers(current => ({ ...current, [key]: value }))} /> : null}
+        {mode === 'focus' ? <FocusView focus={dailyFocus.focus} generating={dailyFocus.generating} onGenerate={dailyFocus.generate} onToggle={dailyFocus.toggleTask} onGoTree={() => setMode('tree')} /> : null}
+        {mode === 'list' ? <ListView treeData={treeData} userGoal={goal} onStatusChange={updateStatus} onSelect={handleNodeSelect} /> : null}
+        {mode === 'review' ? <ReviewView review={weeklyReview.latestReview} history={weeklyReview.history} generating={weeklyReview.generating} onGenerate={() => weeklyReview.generate({ silent: false })} /> : null}
+      </AppShell>
+      {shortcutsOpen ? <ShortcutHelp onClose={() => setShortcutsOpen(false)} /> : null}
+    </>
+  )
+}
+
+function ShortcutHelp({ onClose }) {
+  return (
+    <div className="ft-shortcut-scrim" onMouseDown={event => { if (event.currentTarget === event.target) onClose() }}>
+      <section className="ft-shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-shortcut-title">
+        <div className="ft-shortcut-head">
+          <h2 id="ft-shortcut-title">快捷键</h2>
+          <button type="button" autoFocus onClick={onClose} aria-label="关闭快捷键说明">关闭</button>
+        </div>
+        <dl className="ft-shortcut-list">
+          <div><dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>切换主视图</dd></div>
+          <div><dt><kbd>C</kbd> / <kbd>I</kbd> / <kbd>A</kbd></dt><dd>切换对话、待确认、审计</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>聚焦对话输入框</dd></div>
+          <div><dt><kbd>Tab</kbd> + 方向键</dt><dd>进入树并移动选择</dd></div>
+          <div><dt><kbd>Enter</kbd></dt><dd>展开或折叠节点</dd></div>
+          <div><dt><kbd>Space</kbd></dt><dd>打开节点详情</dd></div>
+          <div><dt><kbd>Delete</kbd></dt><dd>删除当前节点（走确认）</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>关闭浮层或收起抽屉</dd></div>
+        </dl>
+      </section>
+    </div>
   )
 }
 
@@ -325,11 +370,22 @@ function useGuardedDelete(deleteNode, treeData, goal, backupRef) {
 function countPendingProposals(messages = []) {
   return messages.reduce((count, message) => {
     if (message?.role !== 'assistant' || !message.thinking) return count
-    const draft = !message.applied_draft_actions && Array.isArray(message.thinking.draft_actions) ? message.thinking.draft_actions.length : 0
-    const goal = !message.applied_priority_analysis && message.thinking.goal_analysis ? 1 : 0
+    const draft = !message.applied_draft_actions
+      ? Math.max(
+        Array.isArray(message.thinking.draft_actions) ? message.thinking.draft_actions.length : 0,
+        Array.isArray(message.thinking.proposed_panel_changes) ? message.thinking.proposed_panel_changes.length : 0,
+      )
+      : 0
+    const goal = isGoalAnalysisPending(message) ? 1 : 0
     const priority = !message.applied_priority_analysis && Array.isArray(message.thinking.node_priority_proposals) ? message.thinking.node_priority_proposals.length : 0
     return count + draft + goal + priority
   }, 0)
+}
+
+function isGoalAnalysisPending(message) {
+  if (!message?.thinking?.goal_analysis) return false
+  if (message.applied_goal_analysis) return false
+  return 'applied_goal_analysis' in message || !message.applied_priority_analysis
 }
 
 function readLayers() {

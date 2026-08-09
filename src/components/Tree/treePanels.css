@@ -1,0 +1,50 @@
+.ft-context-menu { background: var(--ft-surface-raised); border-color: var(--ft-border); color: var(--ft-text-primary); }
+.ft-context-border-subtle { border-color: var(--ft-border-subtle); }
+.ft-context-text-primary { color: var(--ft-text-primary); }
+.ft-context-text-secondary { color: var(--ft-text-secondary); }
+.ft-context-text-tertiary { color: var(--ft-text-tertiary); }
+.ft-context-hover-surface:hover { background: var(--ft-surface-hover); }
+.ft-context-danger { color: var(--ft-danger); }
+.ft-context-danger:hover { background: var(--ft-danger-soft); }
+
+.ft-detail-panel { display: flex; flex-direction: column; width: 100%; min-width: 0; max-width: none; border: 0; background: var(--ft-surface); color: var(--ft-text-primary); }
+.ft-detail-surface { background: color-mix(in srgb, var(--ft-surface) 98%, transparent); }
+.ft-detail-border-subtle { border-color: var(--ft-border-subtle); }
+.ft-detail-text-primary { color: var(--ft-text-primary); }
+.ft-detail-text-secondary { color: var(--ft-text-secondary); }
+.ft-detail-text-tertiary { color: var(--ft-text-tertiary); }
+.ft-detail-panel .ft-detail-scroll { padding: 18px; }
+.ft-urgent-priority { box-shadow: 0 0 12px var(--ft-accent-soft); }
+.ft-detail-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 15px; color: var(--ft-text-tertiary); font-size: var(--ft-text-2xs); }
+.ft-detail-breadcrumb span { display: inline-flex; align-items: center; gap: 4px; }
+.ft-detail-breadcrumb span:not(:last-child)::after { color: var(--ft-border-strong); content: '›'; }
+.ft-detail-scores { display: flex; flex-direction: column; gap: 8px; padding: 13px 0; margin-bottom: 16px; border-block: 1px solid var(--ft-border-subtle); }
+.ft-detail-score { display: grid; grid-template-columns: 58px 1fr 32px; align-items: center; gap: 8px; color: var(--ft-text-secondary); font-size: var(--ft-text-xs); }
+.ft-detail-score .ft-progress { width: 100%; }
+.ft-detail-score b { color: var(--ft-text-secondary); font: 500 var(--ft-text-2xs)/1 var(--ft-font-mono); text-align: right; }
+.ft-detail-label { color: var(--ft-text-secondary); }
+.ft-detail-close { border-color: var(--ft-border-subtle); color: var(--ft-text-secondary); }
+.ft-detail-close:hover { border-color: var(--ft-border-strong); color: var(--ft-text-primary); }
+.ft-detail-field { border-color: var(--ft-border); background: var(--ft-surface-raised); color: var(--ft-text-primary); }
+.ft-detail-field:focus { border-color: var(--ft-accent); }
+.ft-detail-status { border-color: var(--ft-border-subtle); background: var(--ft-surface-raised); color: var(--ft-text-secondary); }
+.ft-detail-status:hover { border-color: var(--ft-border-strong); color: var(--ft-text-primary); }
+.ft-detail-status.is-active { border-color: var(--ft-accent); background: var(--ft-accent-soft); color: var(--ft-accent); }
+.ft-detail-priority { border-color: var(--ft-border-subtle); background: var(--ft-surface-raised); color: var(--ft-text-secondary); }
+.ft-detail-priority:hover { border-color: var(--ft-border-strong); color: var(--ft-text-primary); }
+.ft-detail-priority.is-active { border-color: var(--ft-accent); background: var(--ft-accent-soft); color: var(--ft-accent); }
+.ft-detail-priority.is-urgent { border-color: color-mix(in srgb, var(--ft-text-primary) 70%, transparent); background: color-mix(in srgb, var(--ft-text-primary) 10%, transparent); color: var(--ft-text-primary); }
+.ft-detail-due { color: var(--ft-warn); }
+.ft-detail-due.is-overdue { color: var(--ft-danger); }
+.ft-detail-error { color: var(--ft-warn); }
+.ft-detail-save-state { color: var(--ft-text-secondary); }
+.ft-detail-branch-dot { background: var(--ft-accent); }
+
+.ft-node-tooltip { background: var(--ft-surface-raised); border-color: var(--ft-border); color: var(--ft-text-primary); }
+.ft-tooltip-primary { color: var(--ft-text-primary); }
+.ft-tooltip-secondary { color: var(--ft-text-secondary); }
+.ft-tooltip-tertiary { color: var(--ft-text-tertiary); }
+.ft-tooltip-faint { color: var(--ft-text-tertiary); opacity: .58; }
+.ft-tooltip-warn { color: var(--ft-warn); }
+.ft-tooltip-danger { color: var(--ft-danger); }
+.ft-tooltip-border-subtle { border-color: var(--ft-border-subtle); }

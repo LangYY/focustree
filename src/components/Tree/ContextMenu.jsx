@@ -36,12 +36,12 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
     <div
       ref={ref}
       style={style}
-      className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1 w-52 text-sm"
+      className="ft-context-menu border rounded-xl shadow-2xl py-1 w-52 text-sm"
     >
       {/* 节点信息头 */}
-      <div className="px-3 py-2 border-b border-gray-800">
-        <div className="font-medium text-gray-200 truncate">{node.name}</div>
-        <div className="text-xs text-gray-500 mt-0.5">
+      <div className="px-3 py-2 border-b ft-context-border-subtle">
+        <div className="font-medium ft-context-text-primary truncate">{node.name}</div>
+        <div className="text-xs ft-context-text-tertiary mt-0.5">
           {TYPE_LABELS[node.type]} · {STATUS_LABELS[node.status]}
         </div>
       </div>
@@ -82,7 +82,7 @@ export default function ContextMenu({ x, y, node, onClose, onAction }) {
           />
         )}
 
-        <div className="border-t border-gray-800 my-1" />
+        <div className="border-t ft-context-border-subtle my-1" />
 
         {/* 删除 */}
         {hasChildren && node.parent_id && (
@@ -109,8 +109,8 @@ function MenuItem({ icon, label, onClick, danger }) {
       onClick={onClick}
       className={`w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors ${
         danger
-          ? 'text-red-400 hover:bg-red-900/30'
-          : 'text-gray-300 hover:bg-gray-800'
+          ? 'ft-context-danger'
+          : 'ft-context-text-secondary ft-context-hover-surface'
       }`}
     >
       <span className="text-xs w-4 text-center">{icon}</span>

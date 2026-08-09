@@ -39,28 +39,28 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
       onClick={onClose}
     >
       <div
-        className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-96 shadow-2xl"
+        className="ft-modal-panel border rounded-2xl p-6 w-96 shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        <div className="text-base font-semibold text-gray-200 mb-4">{title}</div>
+        <div className="text-base font-semibold ft-modal-text-primary mb-4">{title}</div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* 名称 */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5">名称</label>
+            <label className="block text-xs ft-modal-text-secondary mb-1.5">名称</label>
             <input
               ref={inputRef}
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder={isProject ? '项目名称…' : type === 'category' ? '分类名称…' : '任务名称…'}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500 transition-colors"
+              className="w-full ft-modal-surface-hover border ft-modal-border rounded-lg px-3 py-2 text-sm ft-modal-text-primary outline-none ft-modal-field transition-colors"
             />
           </div>
 
           {/* 类型选择（只在没有 parentNode 时显示，顶层可选 project） */}
           {!parentNode && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">类型</label>
+              <label className="block text-xs ft-modal-text-secondary mb-1.5">类型</label>
               <div className="flex gap-2">
                 {['project'].map(t => (
                   <button
@@ -69,8 +69,8 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
                     onClick={() => setType(t)}
                     className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       type === t
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-gray-800 border-gray-700 text-gray-400'
+                        ? 'ft-modal-bg-accent ft-modal-border-accent ft-modal-text-inverse'
+                        : 'ft-modal-surface-hover ft-modal-border ft-modal-text-secondary'
                     }`}
                   >
                     项目
@@ -83,7 +83,7 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
           {/* 颜色（仅 project） */}
           {isProject && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">颜色</label>
+              <label className="block text-xs ft-modal-text-secondary mb-1.5">颜色</label>
               <div className="flex gap-2 flex-wrap">
                 {PROJECT_COLORS.map(c => (
                   <button
@@ -92,7 +92,7 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
                     onClick={() => setColor(c)}
                     style={{ background: c }}
                     className={`w-7 h-7 rounded-full transition-transform ${
-                      color === c ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900 scale-110' : ''
+                      color === c ? 'ft-modal-color-swatch is-selected' : 'ft-modal-color-swatch'
                     }`}
                   />
                 ))}
@@ -105,14 +105,14 @@ export default function AddNodeModal({ parentNode, defaultType, onConfirm, onClo
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2 rounded-lg text-sm text-gray-400 border border-gray-700 hover:border-gray-500 transition-colors"
+              className="flex-1 py-2 rounded-lg text-sm ft-modal-text-secondary border ft-modal-border ft-modal-hover-border-strong transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={!name.trim()}
-              className="flex-1 py-2 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors"
+              className="flex-1 py-2 rounded-lg text-sm font-semibold ft-modal-primary-action transition-colors"
             >
               创建
             </button>

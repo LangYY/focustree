@@ -46,7 +46,9 @@ export default function Drawer({ activeTab, onTabChange, onClose, hasSelection, 
                 key={tab.value}
                 type="button"
                 role="tab"
+                id={`ft-drawer-tab-${tab.value}`}
                 aria-selected={activeTab === tab.value}
+                aria-controls="ft-drawer-panel"
                 disabled={disabled}
                 className={`${activeTab === tab.value ? 'is-active' : ''} ${disabled ? 'is-disabled' : ''}`}
                 onClick={() => onTabChange(activeTab === tab.value ? null : tab.value)}
@@ -62,7 +64,12 @@ export default function Drawer({ activeTab, onTabChange, onClose, hasSelection, 
         </div>
         <button type="button" className="ft-drawer-close" onClick={onClose} aria-label="收起抽屉"><X size={16} /></button>
       </div>
-      <div className="ft-drawer-content" role="tabpanel">
+      <div
+        id="ft-drawer-panel"
+        className="ft-drawer-content"
+        role="tabpanel"
+        aria-labelledby={activeTab ? `ft-drawer-tab-${activeTab}` : undefined}
+      >
         {open ? renderTab?.(activeTab) : <div className="ft-drawer-placeholder"><PanelRight size={28} /><span>从左侧选择一个面板</span></div>}
       </div>
     </aside>

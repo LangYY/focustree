@@ -31,9 +31,9 @@ export default function NodeTooltip({ x, y, node }) {
   return (
     <div
       style={style}
-      className="bg-gray-900 border border-gray-700 rounded-xl shadow-xl px-3 py-2.5 text-xs max-w-48"
+      className="ft-node-tooltip border rounded-xl shadow-xl px-3 py-2.5 text-xs max-w-48"
     >
-      <div className="font-semibold text-gray-100 mb-1">{node.name}</div>
+      <div className="font-semibold ft-tooltip-primary mb-1">{node.name}</div>
 
       <div className="flex items-center gap-1.5 mb-1">
         <span
@@ -44,23 +44,23 @@ export default function NodeTooltip({ x, y, node }) {
             background: statusColor(node.status),
           }}
         />
-        <span className="text-gray-400">{STATUS_LABEL[node.status] || node.status}</span>
+        <span className="ft-tooltip-secondary">{STATUS_LABEL[node.status] || node.status}</span>
       </div>
 
-      <div className="text-gray-500 mt-0.5">
+      <div className="ft-tooltip-tertiary mt-0.5">
         直接优先级 {directPriority} · 枝干 {branchPriority}
       </div>
 
-      <div className="text-gray-500 mt-0.5">
+      <div className="ft-tooltip-tertiary mt-0.5">
         培育程度 {cultivation} · 置信 {confidence}%
       </div>
 
       {(priorityLabel || node.target_completion_date) && (
-        <div className="text-gray-500 mt-0.5">
+        <div className="ft-tooltip-tertiary mt-0.5">
           {priorityLabel && <span>优先级 {priorityLabel}</span>}
-          {priorityLabel && node.target_completion_date && <span className="text-gray-700"> · </span>}
+          {priorityLabel && node.target_completion_date && <span className="ft-tooltip-faint"> · </span>}
           {node.target_completion_date && (
-            <span className={dueState?.state && dueState.state !== 'later' ? 'text-amber-300/90' : ''}>
+            <span className={dueState?.state && dueState.state !== 'later' ? 'ft-tooltip-warn' : ''}>
               {dueState?.label || node.target_completion_date}
             </span>
           )}
@@ -68,13 +68,13 @@ export default function NodeTooltip({ x, y, node }) {
       )}
 
       {staleReasons.length > 0 && (
-        <div className="text-amber-400/80 mt-1">
+        <div className="ft-tooltip-warn mt-1">
           待复核：{staleReasons.slice(0, 3).join('、')}
         </div>
       )}
 
       {node.summary && (
-        <div className="text-gray-400 mt-1.5 border-t border-gray-800 pt-1.5 leading-relaxed">
+        <div className="ft-tooltip-secondary mt-1.5 border-t ft-tooltip-border-subtle pt-1.5 leading-relaxed">
           {node.summary}
         </div>
       )}

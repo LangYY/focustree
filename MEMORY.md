@@ -53,3 +53,22 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 将全量 UI 重做提交为 `31c708f` 并推送到 GitHub `feature/priority-engine-v2`。
 - 确认线上沿用既有 ECS 生产服务部署方式，不是 Docker；通过 GitHub 拉取新版本到独立目录，远程 `npm ci` 和 `npm run build` 成功后再切换服务。
 - 未改动线上 `.env`，切换前将旧版本原样保留在远程回滚备份中；新服务启动后公网首页和健康检查均验证通过。
+---
+
+## 2026-08-09 — FocusTree UI follow-up tasks
+
+- Replaced the remaining named Tailwind color utilities in Chat, Modal, and Tree surfaces with component-scoped semantic token classes, then removed `legacy-theme.css`.
+- Deleted obsolete Toolbar/TodayCard/LeafView/PriorityDebugPanel files. Moved the missing-node and full-tree priority analysis actions into `AuditTab`.
+- Added the shared `Button`, `Slider`, `Chip`, `Tooltip`, and `Badge` primitives. Slider keyboard behavior and focus semantics are explicit.
+- Inbox is the only full proposal interaction surface. It consumes both structured draft actions and panel-change suggestions, keeps per-entry accept/reject state for seven days, and previews priority changes through the same pure proposal application path used by the tree hook.
+- Final verification: `npm test` 14/14 passed, `npm run lint` 0 errors / 5 pre-existing warnings, and `npm run build` passed. Changes remain uncommitted for user acceptance.
+
+---
+
+## 2026-08-09 — Audit truthfulness, motion, and accessibility follow-up
+
+- Audit 的关键路径来自 priority engine 的 `upwardCritical` 传播候选，而不是截断后的前三个子节点；培育度拆成引擎实际使用的四项原始值、权重和贡献，四项合计严格回到 `cultivationScore`。
+- `priorityProposal.test.js` 改为模拟 `useTree.applyPriorityAnalyses` 的持久化行，再从干净树重建 metadata；补充缺失节点、根节点和越界信号边界测试，避免用同一 preview/apply 内部实现自证。
+- TreeView 保持既有 D3 交互层，只在视觉渲染层加入路径生长/收回、节点半径与标签过渡、完成勾线、布局 transition 和最多三个分数变化脉冲；`prefers-reduced-motion` 同时由 CSS 和 D3 duration 降级。
+- 晨纸主题的直接优先级辉光采用 `--ft-text-primary` 暗晕（opacity 乘 0.58，blur 3.5），年轮采用 `--ft-text-secondary`（opacity 乘 1.65，上限 0.85）；实测文字对 surface 为深色 14.72/7.86/4.06、浅色 14.16/5.90/3.03，浅色分支色最低 4.02。
+- 本轮不提交、不部署；本地浏览器仅能进入配置提示页，因为 `.env` 未提供 Supabase/AI 配置。

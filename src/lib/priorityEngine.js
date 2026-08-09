@@ -276,6 +276,24 @@ function ownCultivationEvidence(node) {
   return clamp(points)
 }
 
+function cultivationBreakdown(ownEvidence, structure, completion, recency, cultivationScore) {
+  const components = [
+    { key: 'own_evidence', rawValue: ownEvidence, weight: 0.42 },
+    { key: 'structure', rawValue: structure, weight: 0.32 },
+    { key: 'completion', rawValue: completion, weight: 0.14 },
+    { key: 'recency', rawValue: recency, weight: 0.12 },
+  ]
+  const contributions = components.map(component => roundScore(component.rawValue * component.weight))
+  const roundedTotal = contributions.reduce((sum, value) => sum + value, 0)
+  contributions[contributions.length - 1] = roundScore(
+    contributions[contributions.length - 1] + cultivationScore - roundedTotal,
+  )
+  return components.map((component, index) => ({
+    ...component,
+    contribution: contributions[index],
+  }))
+}
+
 function setMeta(map, id, meta) {
   if (id == null) return
   map.set(id, meta)
@@ -304,18 +322,45 @@ export function computePriorityMetaMap(tree, options = {}) {
     const ownEvidence = ownCultivationEvidence(node)
     const structure = clamp(Math.log2(descendantCount + 1) * 24 + Math.min(24, maxDepth * 8))
     const completion = clamp(Math.log2(completedCount + 1) * 24)
+    const recency = recencyScore(node, now)
     const cultivationScore = roundScore(
       ownEvidence * 0.42 +
       structure * 0.32 +
       completion * 0.14 +
-      recencyScore(node, now) * 0.12
+      recency * 0.12
     )
+    const criticalCandidate = childMetas.reduce((best, childMeta, index) => {
+      const factor = RELATION_PROPAGATION[childMeta.relationType] ?? RELATION_PROPAGATION.normal
+      const propagatedPriority = roundScore(childMeta.upwardCritical * factor)
+      if (!best || propagatedPriority > best.propagatedPriority) {
+        return { child: children[index], childMeta, factor, propagatedPriority }
+      }
+      return best
+    }, null)
+    const usesSelfForCriticalPath = !criticalCandidate || direct.directPriority >= criticalCandidate.propagatedPriority
+    const criticalPath = usesSelfForCriticalPath
+      ? [node.id]
+      : [node.id, ...(criticalCandidate.childMeta.criticalPath || [criticalCandidate.child.id])]
+    const criticalPathEdges = usesSelfForCriticalPath
+      ? []
+      : [{
+          fromId: node.id,
+          toId: criticalCandidate.child.id,
+          relationType: criticalCandidate.childMeta.relationType || 'normal',
+          propagationFactor: criticalCandidate.factor,
+          childUpwardCritical: criticalCandidate.childMeta.upwardCritical,
+          propagatedPriority: criticalCandidate.propagatedPriority,
+        }, ...(criticalCandidate.childMeta.criticalPathEdges || [])]
     const meta = {
       ...direct,
       depth,
       upwardCritical,
       branchPriority: upwardCritical,
       cultivationScore,
+      cultivationBreakdown: cultivationBreakdown(ownEvidence, structure, completion, recency, cultivationScore),
+      criticalPath,
+      criticalPathEdges,
+      criticalPathSource: usesSelfForCriticalPath ? 'self' : 'descendant',
       descendantCount,
       completedCount,
       maxDepth,
