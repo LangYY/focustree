@@ -9,6 +9,12 @@ body,
   height: 100%;
 }
 
+/* html 也要涂底色：body 样式生效前由它承担首屏画面，避免露出浏览器白底。
+   index.html 的引导脚本会先内联同样的颜色，这里是 CSS 落地后的接管。 */
+html {
+  background: var(--ft-canvas);
+}
+
 body {
   margin: 0;
   overflow: hidden;
