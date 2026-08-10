@@ -1,5 +1,6 @@
 import { BookOpen, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { formatReviewContent } from './reviewFormat.js'
 
 export default function ReviewView({ review, history = [], generating, onGenerate }) {
   const [selectedId, setSelectedId] = useState(null)
@@ -20,7 +21,33 @@ export default function ReviewView({ review, history = [], generating, onGenerat
 }
 
 function ReviewContent({ review }) {
-  const summary = review.parsed || review.summary || '这周还没有可读的回顾内容。'
-  if (typeof summary !== 'string') return <pre className="ft-review-text">{JSON.stringify(summary, null, 2)}</pre>
-  return <><span className="ft-review-period">{review.week_start || '最近七天'} — {review.week_end || '今天'}</span><div className="ft-review-text">{summary.split('\n').map((line, index) => line.trim() ? <p key={`${line}-${index}`} className={index === 0 ? 'is-opening' : ''}>{line}</p> : <br key={index} />)}</div></>
+  const content = formatReviewContent(review)
+  const hasContent = content.opening || content.wins.length || content.patterns.length || content.challenges.length || content.proposals.length || content.closing
+
+  return <>
+    <span className="ft-review-period">{review.week_start || '最近七天'} — {review.week_end || '今天'}</span>
+    <div className="ft-review-content">
+      {content.opening ? <p className="ft-review-opening">{content.opening}</p> : null}
+      <ReviewSection title="WINS" items={content.wins} />
+      <ReviewSection title="PATTERNS" items={content.patterns} />
+      <ReviewSection title="CHALLENGES" items={content.challenges} />
+      <ReviewSection title="PROPOSALS" proposals={content.proposals} />
+      {content.closing ? <p className="ft-review-closing">{content.closing}</p> : null}
+      {!hasContent ? <p className="ft-review-empty-copy">这周还没有可读的回顾内容。</p> : null}
+    </div>
+  </>
+}
+
+function ReviewSection({ title, items = [], proposals }) {
+  const content = proposals || items
+  if (!content.length) return null
+
+  return <section className="ft-review-section">
+    <h2 className="ft-review-section-title">{title}</h2>
+    <div className="ft-review-section-body">
+      {proposals
+        ? proposals.map((proposal, index) => <div className="ft-review-proposal" key={`${proposal.action}-${index}`}><p>{proposal.action}</p>{proposal.rationale ? <p className="ft-review-rationale">{proposal.rationale}</p> : null}</div>)
+        : items.map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}
+    </div>
+  </section>
 }

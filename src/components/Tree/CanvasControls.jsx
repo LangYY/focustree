@@ -29,7 +29,6 @@ export default function CanvasControls({ zoomScale = 1, onZoomIn, onZoomOut, onR
             {[
               ['dueArc', '期限弧'],
               ['rings', '年轮'],
-              ['labels', '分数标签'],
             ].map(([key, label]) => (
               <label key={key}><input type="checkbox" checked={layers?.[key] !== false} onChange={event => onLayerChange?.(key, event.target.checked)} /><span>{label}</span></label>
             ))}
