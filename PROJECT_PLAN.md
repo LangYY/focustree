@@ -180,7 +180,7 @@ learned_patterns 单条结构：
 ### 4.2 System Prompt 结构（按位置由顶到底）
 
 ```
-[身份] AI 助理 + 成长教练
+[身份] Focus Agent + 成长教练
 [🔒 状态来源优先级]               ← 最高权威规则，反幻觉的关键
 [## 用户当前阶段目标]              ← 强 anchor
 [## 近期会话回顾]                  ← 最多 5 条 session 摘要
@@ -349,7 +349,7 @@ PostgREST DELETE 父行时即使有 CASCADE 也可能因 FK 约束失败。**删
 
 - 推荐过的 task 被完成时，回填 `recommendation_log.outcome = 'completed'`
 - 7 天未完成 → `outcome = 'dropped'`，AI 收到弱信号
-- UI：「AI 助理」面板加「推荐记录」入口，列出最近推荐及结果
+- UI：「Focus Agent」面板加「推荐记录」入口，列出最近推荐及结果
 - 命中率显示：「AI 本月推荐了 12 件事，完成 8 件」
 - prompt 注入历史命中率，让 AI 自我修正
 

@@ -95,3 +95,12 @@
 .ft-chat-task-link:hover { color: var(--ft-accent-hover); text-decoration-color: var(--ft-accent-hover); }
 .ft-chat-proposal-reference { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--ft-border-subtle); background: transparent; color: var(--ft-accent); font-size: var(--ft-text-xs); text-align: left; cursor: pointer; }
 .ft-chat-proposal-reference:hover { color: var(--ft-accent-hover); }
+.ft-chat-pending-strip { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--ft-border-subtle); border-radius: var(--ft-radius-md); background: color-mix(in srgb, var(--ft-accent-soft) 46%, var(--ft-surface)); }
+.ft-chat-pending-strip > button:first-child { flex: 1; min-width: 0; overflow: hidden; background: transparent; color: var(--ft-accent); font-size: var(--ft-text-xs); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.ft-chat-pending-strip .ft-button { min-height: 28px; padding: 0 8px; border-radius: var(--ft-radius-sm); font-size: var(--ft-text-2xs); }
+.ft-chat-pending-strip .ft-button-primary { background: var(--ft-accent); color: var(--ft-text-inverse); }
+.ft-chat-pending-strip .ft-button-quiet { border: 1px solid var(--ft-border); color: var(--ft-text-secondary); }
+.ft-chat-message .ft-proposal { margin-top: 9px; }
+.ft-processed-inline { display: flex; align-items: center; gap: 6px; padding: 7px 9px; margin-top: 9px; border-left: 2px solid var(--ft-border); color: var(--ft-text-tertiary); font-size: var(--ft-text-2xs); }
+.ft-processed-inline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-processed-inline > .ft-badge { margin-left: auto; flex: 0 0 auto; }

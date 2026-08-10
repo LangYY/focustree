@@ -1,14 +1,12 @@
-import { Archive, Database, History, Lightbulb } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 import AuthPage from './components/Auth/AuthPage'
 import AppShell from './components/Shell/AppShell'
 import CanvasStage from './components/Tree/CanvasStage'
+import NodeInspector from './components/Tree/NodeInspector'
 import ChatPanel from './components/Chat/ChatPanel'
-import NodeDetailPanel from './components/Tree/NodeDetailPanel'
-import InboxTab from './components/Drawer/InboxTab'
-import AuditTab from './components/Drawer/AuditTab'
-import UtilityTab from './components/Drawer/UtilityTab'
+import PriorityAuditModal from './components/Modals/PriorityAuditModal'
+import UtilityModal from './components/Modals/UtilityModal'
 import FocusView from './components/Views/FocusView'
 import ListView from './components/Views/ListView'
 import ReviewView from './components/Views/ReviewView'
@@ -36,13 +34,12 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [mode, setMode] = useState(() => localStorage.getItem('ft_mode') || 'tree')
-  const [drawerTab, setDrawerTab] = useState('chat')
-  const [temporaryTabs, setTemporaryTabs] = useState([])
-  const [model, setModel] = useState(() => localStorage.getItem('ft_model') || 'auto')
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [utilityModal, setUtilityModal] = useState(null)
   const [priorityCalculationVersion, setPriorityCalculationVersion] = useState(() => Date.now())
   const [highlightedNodeId, setHighlightedNodeId] = useState(null)
   const [selectedNodeId, setSelectedNodeId] = useState(null)
-  const [inboxFocusId, setInboxFocusId] = useState(null)
+  const [inspectorFocusId, setInspectorFocusId] = useState(null)
   const [layers, setLayers] = useState(() => readLayers())
   const [themeMode, setThemeMode] = useState(() => localStorage.getItem('ft_theme') || 'dark')
   const [resolvedTheme, setResolvedTheme] = useState(() => localStorage.getItem('ft_theme') === 'light' ? 'light' : 'dark')
@@ -50,7 +47,6 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const resetZoomRef = useRef(null)
   const backupRef = useRef(null)
-  const userPinnedTabRef = useRef(false)
   const lastUserIdRef = useRef(null)
 
   useEffect(() => {
@@ -74,11 +70,6 @@ export default function App() {
     media.addEventListener?.('change', apply)
     return () => media.removeEventListener?.('change', apply)
   }, [themeMode])
-
-  const handleModelChange = useCallback(next => {
-    setModel(next)
-    localStorage.setItem('ft_model', next)
-  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -132,13 +123,31 @@ export default function App() {
   } = useTree(user)
 
   const { goal, goalText, goalExpired, setGoal, clearGoal } = useUserProfile(user)
+  const handleNodeSelect = useCallback(nodeOrId => {
+    const nodeId = typeof nodeOrId === 'string' ? nodeOrId : nodeOrId?.id
+    if (!nodeId) {
+      setHighlightedNodeId(null)
+      setSelectedNodeId(null)
+      return
+    }
+    setHighlightedNodeId(nodeId)
+    setSelectedNodeId(nodeId)
+  }, [])
+  const addNodeAndOpen = useCallback(async payload => {
+    const newId = await addNode(payload)
+    if (newId) {
+      setInspectorFocusId(newId)
+      handleNodeSelect(newId)
+    }
+    return newId
+  }, [addNode, handleNodeSelect])
   const guardedDeleteNode = useGuardedDelete(deleteNode, treeData, goal, backupRef)
   const guardedClearAll = useCallback(async () => {
     await backupRef.current?.preDestructiveBackup?.('清空全部前')
     return clearAll()
   }, [clearAll])
   const treeActions = useMemo(() => ({
-    addNode,
+    addNode: addNodeAndOpen,
     renameNode,
     updateStatus,
     deleteNode: guardedDeleteNode,
@@ -149,7 +158,7 @@ export default function App() {
     collapseAll,
     applyPriorityAnalyses,
     setGoal,
-  }), [addNode, annotateNode, applyPriorityAnalyses, collapseAll, expandAll, guardedClearAll, guardedDeleteNode, renameNode, setGoal, updateNodeDetails, updateStatus])
+  }), [addNodeAndOpen, annotateNode, applyPriorityAnalyses, collapseAll, expandAll, guardedClearAll, guardedDeleteNode, renameNode, setGoal, updateNodeDetails, updateStatus])
 
   const {
     messages, isLoading: chatLoading, sendMessage, resetConversation,
@@ -159,7 +168,7 @@ export default function App() {
     recommendations, hitRate, reloadRecommendations,
     recentSummaries, injectReviewMessage,
     applyPriorityAnalysis, requestPriorityAnalysis, applyDraftPlan,
-  } = useChat(user, treeActions, goal, model)
+  } = useChat(user, treeActions, goal)
   const dailyFocus = useDailyFocus(user, treeData, goal, recentSummaries, learnedPatterns, hitRate)
   const weeklyReview = useWeeklyReview(user, goal, injectReviewMessage)
   const backup = useBackup(user, () => window.location.reload())
@@ -169,8 +178,6 @@ export default function App() {
   const selectedNodeBase = useMemo(() => selectedNodeId ? findNodeInTree(treeData, selectedNodeId) : null, [selectedNodeId, treeData])
   const selectedMeta = useMemo(() => selectedNodeBase ? getDerivedWeightMeta(priorityMetaById, selectedNodeBase) : null, [priorityMetaById, selectedNodeBase])
   const selectedNode = useMemo(() => selectedNodeBase ? { ...selectedNodeBase, ...(selectedMeta ? { __directPriority: selectedMeta.directPriority, __branchPriority: selectedMeta.branchPriority, __cultivationScore: selectedMeta.cultivationScore, __priorityStaleReasons: selectedMeta.staleReasons, __prioritySignals: selectedMeta.signalBreakdown } : {}) } : null, [selectedMeta, selectedNodeBase])
-  const pendingCount = useMemo(() => countPendingProposals(messages), [messages])
-
   useEffect(() => { backupRef.current = backup }, [backup])
   useEffect(() => {
     const refresh = () => setBackupNow(Date.now())
@@ -179,48 +186,9 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const handleNodeSelect = useCallback(nodeOrId => {
-    const node = typeof nodeOrId === 'string' ? findNodeInTree(treeData, nodeOrId) : nodeOrId
-    if (!node?.id) {
-      setHighlightedNodeId(null)
-      setSelectedNodeId(null)
-      return
-    }
-    setHighlightedNodeId(node.id)
-    setSelectedNodeId(node.id)
-    if (!userPinnedTabRef.current) setDrawerTab('detail')
-  }, [treeData])
-
-  const selectDrawerTab = useCallback(tab => {
-    userPinnedTabRef.current = true
-    setDrawerTab(tab)
-  }, [])
-
-  const openInbox = useCallback(messageId => {
-    setInboxFocusId(messageId || null)
-    selectDrawerTab('inbox')
-  }, [selectDrawerTab])
-
-  const closeUtilityTab = useCallback(kind => {
-    setTemporaryTabs(current => current.filter(tab => tab.value !== kind))
-    setDrawerTab(current => current === kind ? 'chat' : current)
-  }, [])
-
-  const openUtilityTab = useCallback(kind => {
-    const config = {
-      memory: { label: '记忆', icon: Lightbulb },
-      recommendations: { label: '推荐', icon: Archive },
-      history: { label: '历史', icon: History },
-      backup: { label: '数据', icon: Database },
-    }[kind]
-    if (!config) return
-    setTemporaryTabs(current => {
-      const next = current.filter(tab => tab.value !== kind)
-      return [...next, { value: kind, ...config, temporary: true, onClose: () => closeUtilityTab(kind) }].slice(-2)
-    })
-    userPinnedTabRef.current = true
-    setDrawerTab(kind)
-  }, [closeUtilityTab])
+  const toggleDrawer = useCallback(() => setDrawerOpen(open => !open), [])
+  const openModal = useCallback(kind => setUtilityModal(kind), [])
+  const closeModal = useCallback(() => setUtilityModal(null), [])
 
   const handleGoalEdit = useCallback(() => {
     const next = window.prompt('设置当前阶段目标：', goalText || '')
@@ -231,10 +199,8 @@ export default function App() {
 
   const createDefaultNode = useCallback(async (parentNode, type) => {
     const nodeType = type || 'task'
-    const newId = await addNode({ name: defaultNodeName(nodeType), type: nodeType, parentId: parentNode?.id || null, color: nodeType === 'project' ? DEFAULT_PROJECT_COLOR : undefined })
-    if (newId) handleNodeSelect(newId)
-    return newId
-  }, [addNode, handleNodeSelect])
+    return addNodeAndOpen({ name: defaultNodeName(nodeType), type: nodeType, parentId: parentNode?.id || null, color: nodeType === 'project' ? DEFAULT_PROJECT_COLOR : undefined })
+  }, [addNodeAndOpen])
 
   const handleContextAction = useCallback(async (action, payload) => {
     const { node, childType, status } = payload
@@ -271,7 +237,9 @@ export default function App() {
       if (event.key === 'Escape') {
         event.preventDefault()
         setShortcutsOpen(false)
-        if (drawerTab) setDrawerTab(null)
+        if (utilityModal) setUtilityModal(null)
+        else if (selectedNodeId) handleNodeSelect(null)
+        else if (drawerOpen) setDrawerOpen(false)
         return
       }
       if (event.key === '?') {
@@ -283,14 +251,12 @@ export default function App() {
       if (mod && key === 'y') { event.preventDefault(); redo(); return }
       if (event.key === 'delete' || event.key === 'backspace') { if (selectedNode) { event.preventDefault(); deleteSelectedNode() } return }
       if (['1', '2', '3', '4'].includes(event.key)) { setMode(['tree', 'focus', 'list', 'review'][Number(event.key) - 1]); return }
-      if (key === 'c') { selectDrawerTab('chat'); return }
-      if (key === 'i') { selectDrawerTab('inbox'); return }
-      if (key === 'a') { selectDrawerTab('audit'); return }
-      if (key === '/') { selectDrawerTab('chat'); window.setTimeout(() => window.dispatchEvent(new CustomEvent('ft-focus-chat')), 0) }
+      if (key === 'c') { toggleDrawer(); return }
+      if (key === '/') { setDrawerOpen(true); window.setTimeout(() => window.dispatchEvent(new CustomEvent('ft-focus-chat')), 0) }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [authLoading, deleteSelectedNode, drawerTab, redo, selectDrawerTab, selectedNode, undo, user])
+  }, [authLoading, deleteSelectedNode, drawerOpen, handleNodeSelect, redo, selectedNode, selectedNodeId, toggleDrawer, undo, user, utilityModal])
 
   const handleDropBranch = useCallback(async (source, target, drop) => {
     if (drop?.mode === 'reorder') await reorderNode(source.id, target.id, drop.placement)
@@ -298,9 +264,9 @@ export default function App() {
   }, [moveNode, reorderNode])
 
   const handlePrefill = useCallback(text => {
-    selectDrawerTab('chat')
+    setDrawerOpen(true)
     window.dispatchEvent(new CustomEvent('ft-prefill-chat', { detail: text }))
-  }, [selectDrawerTab])
+  }, [])
 
   const handleSignOut = useCallback(() => supabase.auth.signOut(), [])
   const handleApplyPriority = useCallback(async (...args) => {
@@ -312,24 +278,44 @@ export default function App() {
   if (authLoading) return <div className="ft-auth-loading"><span className="ft-loading-line" />载入中…</div>
   if (!user) return <AuthPage initialError={authError} />
 
-  const renderDrawerTab = tab => {
-    if (tab === 'chat') return <ChatPanel isOpen messages={messages} isLoading={chatLoading} onSend={text => sendMessage(text, treeData, { selectedNodeId })} goalText={goalText} goalExpired={goalExpired} onSetGoal={setGoal} onClearGoal={clearGoal} model={model} onModelChange={handleModelChange} onResetConversation={resetConversation} onOpenHistory={() => openUtilityTab('history')} onOpenLearned={() => openUtilityTab('memory')} onOpenRecommendations={() => { reloadRecommendations(); openUtilityTab('recommendations') }} onOpenInbox={openInbox} hitRate={hitRate} treeData={treeData} onHoverNode={setHighlightedNodeId} onSelectNode={handleNodeSelect} onTriggerReview={() => weeklyReview.generate({ silent: false })} reviewGenerating={weeklyReview.generating} onRetry={() => retryLastMessage(treeData, { selectedNodeId })} onCancel={cancelRequest} pendingCount={pendingQueue.length} />
-    if (tab === 'inbox') return <InboxTab messages={messages} treeData={treeData} userGoal={goal} onApplyDraftPlan={(messageId, actions) => applyDraftPlan(messageId, treeData, actions)} onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)} onSelectNode={handleNodeSelect} focusId={inboxFocusId} onFocusHandled={() => setInboxFocusId(null)} />
-    if (tab === 'detail') return <NodeDetailPanel key={selectedNode?.id || 'empty'} node={selectedNode} onClose={() => selectDrawerTab('chat')} onRenameNode={renameNode} onUpdateDetails={updateNodeDetails} onUpdatePlanning={updateNodePlanning} onStatusChange={updateStatus} />
-    if (tab === 'audit') return <AuditTab treeData={treeData} goal={goal} selectedNode={selectedNode} onSelectNode={handleNodeSelect} onRequestAnalysis={options => requestPriorityAnalysis(treeData, options)} analysisLoading={chatLoading} onRecalculate={() => setPriorityCalculationVersion(Date.now())} />
-    if (['memory', 'recommendations', 'history', 'backup'].includes(tab)) return <UtilityTab kind={tab} learnedPatterns={learnedPatterns} recommendations={recommendations} sessions={sessions} backup={backup} onClose={() => closeUtilityTab(tab)} />
-    return null
-  }
+  const drawerContent = (
+    <ChatPanel
+      isOpen
+      messages={messages}
+      isLoading={chatLoading}
+      onSend={text => sendMessage(text, treeData, { selectedNodeId })}
+      goalText={goalText}
+      goalExpired={goalExpired}
+      onSetGoal={setGoal}
+      onClearGoal={clearGoal}
+      userGoal={goal}
+      onResetConversation={resetConversation}
+      onOpenHistory={() => openModal('history')}
+      onOpenLearned={() => openModal('memory')}
+      onOpenRecommendations={() => { reloadRecommendations(); openModal('recommendations') }}
+      onApplyDraftPlan={(messageId, actions) => applyDraftPlan(messageId, treeData, actions)}
+      onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)}
+      hitRate={hitRate}
+      treeData={treeData}
+      onHoverNode={setHighlightedNodeId}
+      onSelectNode={handleNodeSelect}
+      onTriggerReview={() => weeklyReview.generate({ silent: false })}
+      reviewGenerating={weeklyReview.generating}
+      onRetry={() => retryLastMessage(treeData, { selectedNodeId })}
+      onCancel={cancelRequest}
+      pendingQueueCount={pendingQueue.length}
+    />
+  )
 
   return (
     <>
       <AppShell
         mode={mode}
-        onModeChange={next => { setMode(next); if (next !== 'tree') userPinnedTabRef.current = true }}
-        drawerTab={drawerTab}
-        onDrawerTab={tab => tab ? selectDrawerTab(tab) : setDrawerTab(null)}
-        onDrawerClose={() => setDrawerTab(null)}
-        renderDrawerTab={renderDrawerTab}
+        onModeChange={setMode}
+        drawerOpen={drawerOpen}
+        onToggleDrawer={toggleDrawer}
+        onDrawerClose={() => setDrawerOpen(false)}
+        drawerContent={drawerContent}
         goal={goal}
         goalText={goalText}
         goalExpired={goalExpired}
@@ -341,20 +327,21 @@ export default function App() {
         nextAction={nextAction}
         onUndo={undo}
         onRedo={redo}
-        onOpenTab={kind => kind === 'account' ? openUtilityTab('memory') : openUtilityTab(kind)}
+        onOpenModal={openModal}
         backupWarning={backupWarning}
         themeMode={themeMode}
         onThemeChange={setThemeMode}
         onSignOut={handleSignOut}
-        hasSelection={Boolean(selectedNode)}
-        pendingCount={pendingCount}
-        temporaryTabs={temporaryTabs}
+        onAccount={() => openModal('memory')}
       >
         {mode === 'tree' ? <CanvasStage theme={resolvedTheme} treeData={treeData} treeLoading={treeLoading} dailyFocus={dailyFocus} onNodeSelect={handleNodeSelect} onNodeToggle={node => toggleNode(node.id)} onContextAction={handleContextAction} resetZoomRef={resetZoomRef} highlightedNodeId={highlightedNodeId} onLeafAdd={createDefaultNode} onDropBranch={handleDropBranch} onRenameNode={renameNode} priorityCalculationVersion={priorityCalculationVersion} density={density} onDensityChange={setDensity} onExpandAll={expandAll} onCollapseAll={collapseAll} onExample={handlePrefill} userGoal={goal} layers={layers} onLayerChange={(key, value) => setLayers(current => ({ ...current, [key]: value }))} /> : null}
+        {mode === 'tree' && selectedNode ? <NodeInspector key={selectedNode.id} node={selectedNode} treeData={treeData} meta={selectedMeta} goal={goal} autoFocusTitle={inspectorFocusId === selectedNode.id} onAutoFocusHandled={() => setInspectorFocusId(null)} onClose={() => handleNodeSelect(null)} onSelectNode={handleNodeSelect} onRenameNode={renameNode} onUpdateDetails={updateNodeDetails} onUpdatePlanning={updateNodePlanning} onStatusChange={updateStatus} onRequestAnalysis={options => requestPriorityAnalysis(treeData, options)} analysisLoading={chatLoading} onRecalculate={() => setPriorityCalculationVersion(Date.now())} /> : null}
         {mode === 'focus' ? <FocusView focus={dailyFocus.focus} generating={dailyFocus.generating} onGenerate={dailyFocus.generate} onToggle={dailyFocus.toggleTask} onGoTree={() => setMode('tree')} /> : null}
         {mode === 'list' ? <ListView treeData={treeData} userGoal={goal} onStatusChange={updateStatus} onSelect={handleNodeSelect} /> : null}
         {mode === 'review' ? <ReviewView review={weeklyReview.latestReview} history={weeklyReview.history} generating={weeklyReview.generating} onGenerate={() => weeklyReview.generate({ silent: false })} /> : null}
       </AppShell>
+      {utilityModal && utilityModal !== 'priorityAudit' ? <UtilityModal kind={utilityModal} learnedPatterns={learnedPatterns} recommendations={recommendations} sessions={sessions} backup={backup} onClose={closeModal} /> : null}
+      {utilityModal === 'priorityAudit' ? <PriorityAuditModal treeData={treeData} goal={goal} onSelectNode={handleNodeSelect} onClose={closeModal} /> : null}
       {shortcutsOpen ? <ShortcutHelp onClose={() => setShortcutsOpen(false)} /> : null}
     </>
   )
@@ -370,11 +357,11 @@ function ShortcutHelp({ onClose }) {
         </div>
         <dl className="ft-shortcut-list">
           <div><dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>切换主视图</dd></div>
-          <div><dt><kbd>C</kbd> / <kbd>I</kbd> / <kbd>A</kbd></dt><dd>切换对话、待确认、审计</dd></div>
+          <div><dt><kbd>C</kbd></dt><dd>开合对话面板</dd></div>
           <div><dt><kbd>/</kbd></dt><dd>聚焦对话输入框</dd></div>
           <div><dt><kbd>Tab</kbd> + 方向键</dt><dd>进入树并移动选择</dd></div>
           <div><dt><kbd>Enter</kbd></dt><dd>展开或折叠节点</dd></div>
-          <div><dt><kbd>Space</kbd></dt><dd>打开节点详情</dd></div>
+          <div><dt><kbd>Space</kbd></dt><dd>打开节点检视卡</dd></div>
           <div><dt><kbd>Delete</kbd></dt><dd>删除当前节点（走确认）</dd></div>
           <div><dt><kbd>Esc</kbd></dt><dd>关闭浮层或收起抽屉</dd></div>
         </dl>
@@ -389,27 +376,6 @@ function useGuardedDelete(deleteNode, treeData, goal, backupRef) {
     if (getDeleteRisk(node, treeData, goal).shouldConfirm) await backupRef.current?.preDestructiveBackup?.('删除子树前')
     return deleteNode(nodeId)
   }, [backupRef, deleteNode, goal, treeData])
-}
-
-function countPendingProposals(messages = []) {
-  return messages.reduce((count, message) => {
-    if (message?.role !== 'assistant' || !message.thinking) return count
-    const draft = !message.applied_draft_actions
-      ? Math.max(
-        Array.isArray(message.thinking.draft_actions) ? message.thinking.draft_actions.length : 0,
-        Array.isArray(message.thinking.proposed_panel_changes) ? message.thinking.proposed_panel_changes.length : 0,
-      )
-      : 0
-    const goal = isGoalAnalysisPending(message) ? 1 : 0
-    const priority = !message.applied_priority_analysis && Array.isArray(message.thinking.node_priority_proposals) ? message.thinking.node_priority_proposals.length : 0
-    return count + draft + goal + priority
-  }, 0)
-}
-
-function isGoalAnalysisPending(message) {
-  if (!message?.thinking?.goal_analysis) return false
-  if (message.applied_goal_analysis) return false
-  return 'applied_goal_analysis' in message || !message.applied_priority_analysis
 }
 
 function readLayers() {

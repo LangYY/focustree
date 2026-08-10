@@ -7,7 +7,7 @@ import { branchColorAt } from '../../lib/branchPalette'
 export default function TopBar({
   goal, goalText, goalExpired, onEditGoal,
   user, canUndo, canRedo, lastAction, nextAction, onUndo, onRedo,
-  onOpenTab, backupWarning, themeMode, onThemeChange, onSignOut,
+  onOpenModal, backupWarning, themeMode, onThemeChange, onSignOut,
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const initial = String(user?.email || 'F').slice(0, 1).toUpperCase()
@@ -35,7 +35,7 @@ export default function TopBar({
           </button>
         </div>
 
-        <button type="button" className={`ft-backup-status ${backupWarning ? 'is-warning' : ''}`} onClick={() => onOpenTab?.('backup')} title={backupWarning ? '超过 7 天没有手动导出' : '数据备份'}>
+        <button type="button" className={`ft-backup-status ${backupWarning ? 'is-warning' : ''}`} onClick={() => onOpenModal?.('backup')} title={backupWarning ? '超过 7 天没有手动导出' : '数据备份'}>
           <span className="ft-status-dot" />
           <Database size={14} strokeWidth={1.7} />
           <span>数据</span>
@@ -65,10 +65,11 @@ export default function TopBar({
                   ]}
                 />
                 <div className="ft-menu-divider" />
-                <MenuItem label="AI 记忆" onClick={() => { onOpenTab?.('memory'); setMenuOpen(false) }} />
-                <MenuItem label="推荐记录" onClick={() => { onOpenTab?.('recommendations'); setMenuOpen(false) }} />
-                <MenuItem label="会话历史" onClick={() => { onOpenTab?.('history'); setMenuOpen(false) }} />
-                <MenuItem label="数据备份" onClick={() => { onOpenTab?.('backup'); setMenuOpen(false) }} />
+                <MenuItem label="AI 记忆" onClick={() => { onOpenModal?.('memory'); setMenuOpen(false) }} />
+                <MenuItem label="推荐记录" onClick={() => { onOpenModal?.('recommendations'); setMenuOpen(false) }} />
+                <MenuItem label="会话历史" onClick={() => { onOpenModal?.('history'); setMenuOpen(false) }} />
+                <MenuItem label="数据备份" onClick={() => { onOpenModal?.('backup'); setMenuOpen(false) }} />
+                <MenuItem label="整棵树审计" onClick={() => { onOpenModal?.('priorityAudit'); setMenuOpen(false) }} />
                 <div className="ft-menu-divider" />
                 <MenuItem label="退出登录" tone="danger" onClick={onSignOut} />
               </div>

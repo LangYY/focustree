@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { flattenTree } from '../../lib/treeUtils'
+import ProposalCards from './ProposalCards'
+import Button from '../ui/Button'
 
 /**
  * 解析一行文本：找出所有「任务名」并按是否能映射到 treeData 节点切片
@@ -183,22 +185,6 @@ function ThinkingCard({ thinking }) {
   )
 }
 
-function ProposalReferenceCard({ thinking, messageId, onOpenInbox }) {
-  const draftCount = Math.max(
-    Array.isArray(thinking?.draft_actions) ? thinking.draft_actions.length : 0,
-    Array.isArray(thinking?.proposed_panel_changes) ? thinking.proposed_panel_changes.length : 0,
-  )
-  const goalCount = thinking?.goal_analysis ? 1 : 0
-  const priorityCount = Array.isArray(thinking?.node_priority_proposals) ? thinking.node_priority_proposals.length : 0
-  const total = draftCount + goalCount + priorityCount
-  if (!total) return null
-  return (
-    <button type="button" className="ft-chat-proposal-reference" onClick={() => onOpenInbox?.(messageId)}>
-      <span>产生了 {total} 条待确认提案</span><span aria-hidden="true">→</span>
-    </button>
-  )
-}
-
 function ListRow({ label, items, valueColor = 'ft-chat-text-secondary' }) {
   return (
     <div>
@@ -224,24 +210,17 @@ function Row({ label, value, valueColor = 'ft-chat-text-secondary', emphasis, mu
   )
 }
 
-const MODEL_OPTIONS = [
-  { value: 'auto',     label: '自动',  hint: '质量优先：复杂梳理/规划用深度，短操作用快速' },
-  { value: 'chat',     label: '快速',  hint: 'DeepSeek V4-flash · 便宜快' },
-  { value: 'reasoner', label: '深度',  hint: 'DeepSeek V4-pro · 推理强' },
-]
-
 export default function ChatPanel({
   messages, isLoading, onSend, isOpen,
   onClearGoal,
-  model, onModelChange,
   onResetConversation,
   onOpenHistory, onOpenLearned, onOpenRecommendations,
-  onOpenInbox,
   hitRate,
   treeData, onHoverNode, onSelectNode,
   onTriggerReview, reviewGenerating,
   onRetry,
-  onCancel, pendingCount,
+  onCancel, pendingQueueCount,
+  userGoal, onApplyDraftPlan, onApplyPriorityAnalysis,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -336,7 +315,7 @@ export default function ChatPanel({
     >
       {/* Header */}
       <div className="ft-chat-header">
-        <span className="ft-chat-title">AI 助理</span>
+        <span className="ft-chat-title">Focus Agent</span>
         <div className="ft-chat-header-actions">
           {onTriggerReview && (
             <button
@@ -389,24 +368,29 @@ export default function ChatPanel({
               新对话
             </button>
           )}
-          {onModelChange && (
-            <select
-              value={model || 'auto'}
-              onChange={e => onModelChange(e.target.value)}
-              title={MODEL_OPTIONS.find(o => o.value === (model || 'auto'))?.hint}
-              className="ft-chat-surface-hover ft-chat-text-secondary text-[11px] border ft-chat-border rounded px-1.5 py-0.5 outline-none ft-chat-control cursor-pointer"
-            >
-              {MODEL_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          )}
         </div>
       </div>
 
       {/* Messages */}
       <div className="ft-chat-messages">
-        {messages.map(msg => {
+        <ProposalCards
+          messages={messages}
+          treeData={treeData}
+          userGoal={userGoal}
+          onApplyDraftPlan={onApplyDraftPlan}
+          onApplyPriorityAnalysis={onApplyPriorityAnalysis}
+          onSelectNode={onSelectNode}
+        >
+          {({ pendingCount: proposalCount, scrollToPending, applyAll, rejectAll, renderForMessage }) => (
+            <>
+              {proposalCount > 0 && (
+                <div className="ft-chat-pending-strip">
+                  <button type="button" onClick={scrollToPending}>还有 {proposalCount} 条提案待确认 ↑</button>
+                  <Button size="sm" onClick={applyAll}>全部采纳</Button>
+                  <Button size="sm" variant="quiet" onClick={rejectAll}>全部否决</Button>
+                </div>
+              )}
+              {messages.map(msg => {
           // 周末回顾：特殊样式（更宽、不同背景）
           if (msg.kind === 'weekly_review') {
             return (
@@ -442,9 +426,7 @@ export default function ChatPanel({
                 {msg.role === 'assistant' && msg.thinking && (
                   <ThinkingCard thinking={msg.thinking} />
                 )}
-                {msg.role === 'assistant' && msg.thinking && (
-                  <ProposalReferenceCard thinking={msg.thinking} messageId={msg.id} onOpenInbox={onOpenInbox} />
-                )}
+                {msg.role === 'assistant' && renderForMessage(msg.id)}
                 {msg.role === 'assistant' && msg.model_used && (
                   <div
                     className="mt-1 text-[10px] ft-chat-text-tertiary"
@@ -478,16 +460,19 @@ export default function ChatPanel({
               </div>
             </div>
           )
-        })}
+              })}
+            </>
+          )}
+        </ProposalCards>
 
         {isLoading && (
           <div className="ft-chat-waiting-wrap">
             <div className="ft-chat-waiting">
               <span className="ft-chat-wait-line" />
               <span className="ft-mono">等待中</span>
-              {pendingCount > 0 && (
+              {pendingQueueCount > 0 && (
                 <span className="ml-2 ft-chat-text-warn text-[11px]">
-                  还有 {pendingCount} 条消息等待处理
+                  还有 {pendingQueueCount} 条消息等待处理
                 </span>
               )}
             </div>
@@ -520,9 +505,9 @@ export default function ChatPanel({
               className="ft-chat-cancel"
             >
               停止
-              {pendingCount > 0 && (
+              {pendingQueueCount > 0 && (
                 <span className="ft-chat-queue-badge">
-                  {pendingCount}
+                  {pendingQueueCount}
                 </span>
               )}
             </button>

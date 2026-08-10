@@ -5,7 +5,7 @@
 @import "./components/Shell/shell.css";
 @import "./components/Tree/canvasChrome.css";
 @import "./components/Views/views.css";
-@import "./components/Drawer/drawerTabs.css";
+@import "./components/Chat/conversationPanels.css";
 @import "./components/Auth/auth.css";
 @import "./components/Chat/chat.css";
 @import "./components/Modals/modalPanels.css";

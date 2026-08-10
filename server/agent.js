@@ -38,7 +38,6 @@ const VALID_STRATEGIC_TAG = ['现金流', '资产积累', '信号建立', '维�
  * @param {Set<string>} nodeIdSet  树中所有合法 id 的集合（用于校验）
  * @param {Array} history          对话历史 [{role, content}]
  * @param {object} userGoal        { text, set_at, expires_at, constraints, exclude } | null
- * @param {string} model           'auto' | 'chat' | 'reasoner'，默认 'auto'
  * @param {string} provider        'deepseek' | 'openai'，默认 'deepseek'
  * @param {string} apiKey          LLM API key
  * @returns {{ intent, reply, actions, thinking?, model_used? }}
@@ -47,7 +46,7 @@ export async function runAgent({
   message, treeText, nodeIdSet, history, userGoal,
   recentSummaries = [], learnedPatterns = [], userMemory = null, contextMode = 'global_tree', hitRate = null,
   clientTime = null,
-  model = 'auto', provider = 'deepseek', apiKey,
+  provider = 'deepseek', apiKey,
   signal = null,
 }) {
   const contextPolicy = resolveContextPolicy()
@@ -69,7 +68,7 @@ export async function runAgent({
     clientTime,
     contextPolicy
   )
-  const modelName = resolveModel(model, message, provider)
+  const modelName = resolveModel()
   let lastError = null
   let lastErrorKind = null
 
@@ -86,7 +85,7 @@ export async function runAgent({
       ? systemPrompt + `\n\n## 系统重试提示（第 ${attempt + 1}/${MAX_RETRIES} 次）\n上一轮输出无效：${lastError}\n请严格按 Schema 重新生成合法 JSON。`
       : systemPrompt
 
-    const attemptModel = resolveAttemptModel(modelName, provider, attempt, lastErrorKind)
+    const attemptModel = resolveAttemptModel(modelName, attempt, lastErrorKind)
     let llmResult
     let raw
     try {
@@ -95,7 +94,7 @@ export async function runAgent({
     } catch (err) {
       if (signal?.aborted) {
         console.log('[agent] LLM call aborted')
-        return { intent: 'query', reply: '已停止。', actions: [], model_used: attemptModel, context_policy: { policy: contextPolicy, mode: contextMode }, aborted: true }
+        return { intent: 'query', reply: '已停止。', actions: [], model_used: modelName, context_policy: { policy: contextPolicy, mode: contextMode }, aborted: true }
       }
       lastError = `API 调用失败：${err.message}`
       lastErrorKind = 'api'
@@ -131,7 +130,7 @@ export async function runAgent({
     console.log(`[agent] success on attempt ${attempt + 1}, model=${attemptModel}, intent=${normalized.intent}, actions=${normalized.actions.length}, has_thinking=${!!normalized.thinking}`)
     return {
       ...normalized,
-      model_used: attemptModel,
+      model_used: modelName,
       context_policy: { policy: contextPolicy, mode: contextMode },
       usage: llmResult.usage || null,
       usage_cost: llmResult.usageCost || null,
@@ -155,57 +154,16 @@ export async function runAgent({
 }
 
 /**
- * 'auto' / 'chat' / 'reasoner' → 实际模型名
- * auto 模式启发式：如果消息像推荐/优先级/建议类问题，用 reasoner；否则 chat
+ * 前端只有一个模型入口；内部重试才会根据失败类型切换到 pro。
  */
-function resolveModel(mode, message, provider = 'deepseek') {
-  const isOpenAI = provider === 'openai'
-  const chatModel = isOpenAI
-    ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
-    : 'deepseek-v4-flash'
-  const reasonerModel = isOpenAI
-    ? (process.env.OPENAI_MODEL_REASONER || process.env.OPENAI_MODEL || 'gpt-4o')
-    : 'deepseek-v4-pro'
-
-  if (mode === 'chat')     return chatModel
-  if (mode === 'reasoner') return reasonerModel
-
-  // auto 模式质量优先：只有短而明确的纯操作才用 flash，任何需要理解、拆解、规划的输入都用 pro。
-  const msg = message.trim()
-
-  // 1. 极短 + 非问句 → 可能是测试或填充 → flash
-  if (msg.length < 4 && !/[?？]/.test(msg)) return chatModel
-
-  // 2. 长文本、批量描述、项目梳理天然需要结构判断 → pro
-  const hasLongContext = msg.length > 80 || /\n|[；;]/.test(msg) || /(?:^|\n)\s*(?:\d+[.、]|[-*])/.test(msg)
-  if (hasLongContext) return reasonerModel
-
-  // 3. 任何"帮我理解/整理/判断"都用 pro，即使里面出现"添加/创建"等操作动词。
-  const qualityWords = /(梳理|整理|拆解|归类|分类|层级|结构|规划|计划|策略|分析|判断|评估|建议|推荐|优先|权衡|取舍|路线|方案|目标|现金流|变现|复盘|总结|帮我|怎么看|怎么做|为什么|要不要|该不该|值得|想做)/
-  if (qualityWords.test(msg)) return reasonerModel
-
-  // 4. 纯命令式（含明确操作动词 + 不带反思/推理词 + 不是问句）
-  //    用"含有"而非"开头"，覆盖"在 X 下添加 Y"这种位置在中间的指令
-  const actionVerbs    = /(添加|加任务|加分类|新建|创建|删除|删掉|重命名|改名为|标记|做完了|完成了|暂停|搁置|清空|清除)/
-  const isQuestion     = /[?？]/.test(msg)
-  if (actionVerbs.test(msg) && !isQuestion) {
-    return chatModel
-  }
-
-  // 5. 其他一切（问句 / 推理词 / 较长输入 / 不确定）→ V4-pro
-  return reasonerModel
+export function resolveModel() {
+  return 'deepseek-v4-flash'
 }
 
-function resolveAttemptModel(primaryModel, provider, attempt, lastErrorKind) {
+export function resolveAttemptModel(primaryModel, attempt, lastErrorKind) {
   if (attempt === 0) return primaryModel
   if (!['empty_content', 'parse'].includes(lastErrorKind)) return primaryModel
-
-  const isOpenAI = provider === 'openai'
-  const jsonStableModel = isOpenAI
-    ? (process.env.OPENAI_MODEL_CHAT || process.env.OPENAI_MODEL || 'gpt-4o-mini')
-    : 'deepseek-v4-flash'
-
-  return jsonStableModel
+  return 'deepseek-v4-pro'
 }
 
 function resolveContextPolicy() {
@@ -261,7 +219,7 @@ function buildSystemPrompt(treeText, userGoal, recentSummaries, learnedPatterns,
   // 学习模式限制最近 10 条，避免 prompt 膨胀
   const learnedBlock = userMemory ? '' : formatLearnedBlock((learnedPatterns || []).slice(-10))
 
-  return `你是「专注树」AI 助理。风格：简洁、克制、有判断力。不写空泛鼓励，但要给出真实取舍和结构化判断。纯操作确认一句话收住；复杂梳理、规划、推荐要说清楚为什么。你的唯一输出必须是合法 JSON，不得包含任何额外文字、markdown 代码块或注释。
+  return `你是「专注树」Focus Agent。风格：简洁、克制、有判断力。不写空泛鼓励，但要给出真实取舍和结构化判断。纯操作确认一句话收住；复杂梳理、规划、推荐要说清楚为什么。你的唯一输出必须是合法 JSON，不得包含任何额外文字、markdown 代码块或注释。
 
 ## reply 的人话原则（重要）
 thinking 里的字段是给你自己用的推理脚手架，用来防止遗漏、方便复盘校验，用户不会逐字段阅读。reply 才是用户实际会读的内容，必须读起来像一个很了解这些项目、跟用户很熟的人在说话，不是在生成一份结构化报告。
@@ -284,7 +242,7 @@ ${contextBlock}${scopeBlock}${timeBlock}${goalBlock}${userMemoryBlock}${summarie
 ## 当前项目树（括号内是节点 ID，操作时必须使用这些 ID）
 ${trimmedTree}
 
-## AI 助手的核心职责
+## Focus Agent 的核心职责
 你不是简单的增删改命令入口。明确、机械的操作通常已由本地算法处理；如果这类请求偶然进入你这里，保持极简即可。你的主要价值在这些场景：
 - 用户表达混乱、压力、犹豫、多个项目互相牵扯：先帮他把局面看清楚，再落成可执行结构。
 - 用户需要规划、优先级、取舍、复盘：给出判断依据、关键风险和下一步动作。
@@ -859,28 +817,7 @@ function buildMessages(history, message) {
 // ── LLM 调用 ─────────────────────────────────────────
 
 async function callLLM(systemPrompt, messages, apiKey, modelName, provider, signal) {
-  const isDeepSeek = provider !== 'openai'
-  const isPro = modelName === 'deepseek-v4-pro'
-  const body = {
-    model: modelName,
-    messages: [{ role: 'system', content: systemPrompt }, ...messages],
-    // V4-pro 的 reasoning_content 占用 token 预算。大段输入可能触发大量 actions（如批量创建节点），需留足空间
-    // V4-flash 现在也是推理模型，reasoning_content 会吃 token；
-    // 配上 agent 的庞大 system prompt 经常爆 1200。提到 8000 留出余量。
-    max_tokens: isPro ? 16000 : 8000,
-  }
-
-  // DeepSeek 官方建议 JSON Output 显式设置 response_format，但也说明可能偶发空 content。
-  // 实测 V4-pro 对当前长 system prompt 更容易触发空 content；因此 pro 先靠 prompt 约束，
-  // JSON 模式留给更稳定的 flash/OpenAI 路径，必要时由 runAgent 自动降级重试。
-  if (!isDeepSeek || !isPro || process.env.DEEPSEEK_PRO_JSON_MODE === 'true') {
-    body.response_format = { type: 'json_object' }
-  }
-
-  // pro 模型内置推理，不接受 temperature；其他模型用低温稳定 JSON。
-  if (!isDeepSeek || !isPro) {
-    body.temperature = 0.3
-  }
+  const body = buildAgentRequestBody(systemPrompt, messages, modelName)
 
   const data = await postChatCompletion(provider, body, { apiKey, signal })
   const choice = data.choices?.[0]
@@ -891,6 +828,16 @@ async function callLLM(systemPrompt, messages, apiKey, modelName, provider, sign
     finishReason: choice?.finish_reason || null,
     usage: data.usage || null,
     usageCost: data.usage_cost || null,
+  }
+}
+
+export function buildAgentRequestBody(systemPrompt, messages, modelName = 'deepseek-v4-flash') {
+  return {
+    model: modelName,
+    messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    max_tokens: 16000,
+    reasoning_effort: 'max',
+    response_format: { type: 'json_object' },
   }
 }
 

@@ -20,7 +20,7 @@ export async function sendMessage({ messages, treeContext }) {
 }
 
 function buildSystemPrompt(treeContext) {
-  return `你是「专注树」的 AI 助理，帮助自由职业者理清工作优先级。
+  return `你是「专注树」的 Focus Agent，帮助自由职业者理清工作优先级。
 
 当前项目树状态：
 ${treeContext ? JSON.stringify(treeContext, null, 2) : '暂无数据'}

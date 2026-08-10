@@ -10,7 +10,7 @@ import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
 const WELCOME = {
   id: 'welcome',
   role: 'assistant',
-  content: '你好，我是你的专注树助理。说说现在想做什么？',
+  content: '你好，我是 Focus Agent。说说现在想做什么？',
 }
 
 const SESSION_LOAD_LIMIT = 200
@@ -164,6 +164,7 @@ function nodePath(nodes) {
 }
 
 export function useChat(user, treeActions, userGoal, model = 'auto') {
+  void model
   const [messages, setMessages] = useState([WELCOME])
   const [isLoading, setIsLoading] = useState(false)
 
@@ -666,7 +667,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
 
       const agentStartedAt = performance.now()
       const result = await callAgent({
-        content, treeText, nodeIds, history, userGoal, model,
+        content, treeText, nodeIds, history, userGoal,
         recentSummaries: [], learnedPatterns: [],
         userMemory, contextMode, hitRate,
         clientTime: getClientTime(),
@@ -798,7 +799,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         return prev
       })
     }
-  }, [user, messages, treeActions, userGoal, model, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading, applyConfirmablePlan])
+  }, [user, messages, treeActions, userGoal, sessionId, recentSummaries, learnedPatterns, hitRate, isLoading, applyConfirmablePlan])
 
   /** Apply a reviewed goal/priority analysis from an assistant message. */
   const applyPriorityAnalysis = useCallback(async (messageId, overrides, treeData) => {
@@ -893,7 +894,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       const response = await fetch('/api/priority-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes, goal: userGoal, mode, model }),
+        body: JSON.stringify({ nodes, goal: userGoal, mode }),
         signal: controller.signal,
       })
       const result = await response.json()
@@ -943,7 +944,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
       if (abortRef.current === controller) abortRef.current = null
       setIsLoading(false)
     }
-  }, [isLoading, sessionId, user, userGoal, model])
+  }, [isLoading, sessionId, user, userGoal])
 
   /**
    * 用户主动新开对话。
@@ -1062,14 +1063,14 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
 
 // ── 调用服务端 Agent ──────────────────────────────────
 
-async function callAgent({ content, treeText, nodeIds, history, userGoal, model, recentSummaries, learnedPatterns, userMemory, contextMode, hitRate, clientTime, signal }) {
+async function callAgent({ content, treeText, nodeIds, history, userGoal, recentSummaries, learnedPatterns, userMemory, contextMode, hitRate, clientTime, signal }) {
   const res = await fetch('/api/agent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message:  content,
       treeText, nodeIds, history,
-      userGoal, model,
+      userGoal,
       recentSummaries,
       learnedPatterns,
       userMemory,

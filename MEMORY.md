@@ -135,3 +135,19 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - The main code-level failure path is `useChat.sendMessage` awaiting the user-scoped `conversations` insert before `/api/agent`; the await is outside the later `try/finally` and has no timeout. A stalled/rejected session/network/RLS write can therefore leave loading active while no agent request is sent.
 - ECS logs also show provider intermittency: one request took about 46 seconds, and another received empty content twice before succeeding on retry 3. This is a slow/retry path, not a current provider outage.
 - Incident discriminator: no `/api/agent` means the pre-agent Supabase path; a long-pending `/api/agent` means provider latency/retries; a 200 JSON response moves the investigation to client response state/rendering. Full authenticated attribution requires a user-provided Network observation, not credentials.
+
+---
+
+## 2026-08-10 — RCA conclusions merged from temporary reports
+
+- The no-response investigation found a high-risk client path before `/api/agent`: `useChat.sendMessage` awaited the authenticated Supabase conversation insert without a timeout and outside the later `try/finally`. A stalled or rejected session/network/RLS write can leave the loading state active without sending an agent request. If `/api/agent` is already pending, provider latency and empty-content retries are separate possibilities; a bounded synthetic probe reached the public route and returned valid DeepSeek JSON.
+- The TreeView blank-shell investigation found that D3 treated a `mouseleave` handler registered after `.transition()` as a transition event. Binding the handler on the selection before starting the transition fixed the `unknown type: mouseleave` crash. The controlled browser then rendered the tree role and four nodes; the local no-config Supabase mock still lacks `.limit()` for chat/review hooks.
+
+---
+
+## 2026-08-10 — Architecture task B implementation
+
+- Replaced the multi-tab right drawer with one resizable Focus Agent conversation panel. Proposal interactions now live under their source assistant message through `ProposalCards`; processed entries remain as one-line records at the original location, while priority previews reuse the existing pure preview map with a 120ms debounce.
+- Replaced the right-side detail/audit tabs with a DOM-anchored `NodeInspector` floating card. It retains detail autosave and keyboard restore/save behavior, follows tree pan/zoom, and folds the real priority explanation fields into a collapsed audit section. The whole-tree sortable audit table moved to a centered account modal.
+- Fixed the user-facing model contract to DeepSeek V4 Flash with maximum reasoning and a 16k token budget. Empty-content and JSON-parse retries still internally escalate to pro; the UI and request payload no longer expose a model choice. No temperature was sent because this workspace has no DeepSeek key for the requested empirical Flash + max verification.
+- Updated `DESIGN.md`, `HANDOFF.md`, and Focus Agent naming across UI/prompt/docs; deleted obsolete drawer/detail components and merged the temporary RCA conclusions into root memory. No commit or deployment was made.

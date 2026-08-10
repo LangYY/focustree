@@ -11,7 +11,7 @@ const ITEMS = [
 ]
 
 export default function Legend({ onHover }) {
-  const [open, setOpen] = useState(() => localStorage.getItem('ft_legend') !== 'closed')
+  const [open, setOpen] = useState(() => localStorage.getItem('ft_legend') === 'open')
   const toggle = () => {
     setOpen(value => {
       const next = !value

@@ -6,10 +6,10 @@ export default function AppShell({
   children,
   mode,
   onModeChange,
-  drawerTab,
-  onDrawerTab,
+  drawerOpen,
+  onToggleDrawer,
   onDrawerClose,
-  renderDrawerTab,
+  drawerContent,
   goal,
   goalText,
   goalExpired,
@@ -21,14 +21,12 @@ export default function AppShell({
   nextAction,
   onUndo,
   onRedo,
-  onOpenTab,
+  onOpenModal,
   backupWarning,
   themeMode,
   onThemeChange,
   onSignOut,
-  hasSelection,
-  pendingCount,
-  temporaryTabs,
+  onAccount,
 }) {
   return (
     <div className="ft-app-shell">
@@ -44,7 +42,7 @@ export default function AppShell({
         nextAction={nextAction}
         onUndo={onUndo}
         onRedo={onRedo}
-        onOpenTab={onOpenTab}
+        onOpenModal={onOpenModal}
         backupWarning={backupWarning}
         themeMode={themeMode}
         onThemeChange={onThemeChange}
@@ -54,23 +52,16 @@ export default function AppShell({
         <LeftRail
           mode={mode}
           onModeChange={onModeChange}
-          drawerTab={drawerTab}
-          onDrawerTab={onDrawerTab}
-          pendingCount={pendingCount}
+          drawerOpen={drawerOpen}
+          onToggleDrawer={onToggleDrawer}
           themeMode={themeMode}
           onThemeChange={onThemeChange}
-          onAccount={() => onOpenTab?.('account')}
+          onAccount={onAccount}
         />
         <main className="ft-stage">{children}</main>
-        <Drawer
-          activeTab={drawerTab}
-          onTabChange={onDrawerTab}
-          onClose={onDrawerClose}
-          hasSelection={hasSelection}
-          pendingCount={pendingCount}
-          temporaryTabs={temporaryTabs}
-          renderTab={renderDrawerTab}
-        />
+        <Drawer open={drawerOpen} onClose={onDrawerClose}>
+          {drawerContent}
+        </Drawer>
       </div>
     </div>
   )
