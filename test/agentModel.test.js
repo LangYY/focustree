@@ -13,7 +13,7 @@ test('agent request uses maximum reasoning and the expanded flash token budget',
   assert.equal(body.model, 'deepseek-v4-flash')
   assert.equal(body.reasoning_effort, 'max')
   assert.equal(body.max_tokens, 16000)
-  assert.equal('temperature' in body, false)
+  assert.equal(body.temperature, 0.3)
 })
 
 test('empty or unparsable flash responses retry internally with the pro model', () => {

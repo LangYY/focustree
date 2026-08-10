@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { localDateKey } from '../lib/clientTime'
+import { serializeReview as serializeReviewText } from '../lib/reviewSerialization.js'
+
+export function serializeReview(review) {
+  return serializeReviewText(review)
+}
 
 /**
  * 周末主动回顾
@@ -223,18 +228,4 @@ export function useWeeklyReview(user, userGoal, onReviewReady) {
     markAcknowledged,
     reload: loadHistory,
   }
-}
-
-/**
- * 把结构化 review 序列化成存表用的 text。chat 注入时再 parse 回来。
- */
-function serializeReview(r) {
-  const parts = []
-  if (r.opening) parts.push(r.opening)
-  if (r.wins?.length)       parts.push('\n📌 本周进展：\n' + r.wins.map(w => '· ' + w).join('\n'))
-  if (r.patterns?.length)   parts.push('\n🔍 看到的模式：\n' + r.patterns.map(p => '· ' + p).join('\n'))
-  if (r.challenges?.length) parts.push('\n❓ 想问你：\n' + r.challenges.map(c => '· ' + c).join('\n'))
-  if (r.proposals?.length)  parts.push('\n💡 下周提议：\n' + r.proposals.map(p => `· ${p.action} — ${p.rationale}`).join('\n'))
-  if (r.closing) parts.push('\n' + r.closing)
-  return parts.join('\n')
 }

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { flattenTree } from '../../lib/treeUtils'
 import ProposalCards from './ProposalCards'
+import { OnboardingChatGuide } from '../Onboarding/Onboarding.jsx'
 import Button from '../ui/Button'
 
 /**
@@ -86,8 +87,13 @@ function formatLocalRoute(route) {
 function MessageContent({ content, nameToId, onHoverNode, onSelectNode }) {
   const lines = content.split('\n')
 
+  // 状态标记只用来选样式，不该被用户读到。渲染前剥掉，由 badge 的视觉承担语义。
+  function stripStatusMarker(line) {
+    return line.replace(/^(\[OK\]|\[目标\]|\[-\]|✅|🎯|⚠️)\s*/u, '')
+  }
+
   function renderLine(line, i, classNameWrap) {
-    const segments = parseTaskRefs(line, nameToId || {})
+    const segments = parseTaskRefs(classNameWrap ? stripStatusMarker(line) : line, nameToId || {})
     const inner = segments.map((seg, idx) => {
       if (seg.kind === 'text') return <span key={idx}>{seg.text}</span>
       const linked = !!seg.nodeId
@@ -221,6 +227,7 @@ export default function ChatPanel({
   onRetry,
   onCancel, pendingQueueCount,
   userGoal, onApplyDraftPlan, onApplyPriorityAnalysis,
+  onboarding, onOnboardingToday, onOnboardingApplyAll,
 }) {
   // 树扁平化 → 用 name 反查 id（任务名重复时取第一个找到的，足够日常使用）
   const nameToId = useMemo(() => {
@@ -234,6 +241,7 @@ export default function ChatPanel({
   const [input, setInput] = useState('')
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
+  const displayMessages = onboarding?.active ? messages.filter(message => message.id !== 'welcome') : messages
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -294,6 +302,12 @@ export default function ChatPanel({
 
     onSend(text)
     setInput('')
+  }
+
+  function handleOnboardingToday() {
+    if (isLoading) return
+    onOnboardingToday?.()
+    onSend('问问今天该做什么')
   }
 
   function handleKeyDown(e) {
@@ -373,6 +387,12 @@ export default function ChatPanel({
 
       {/* Messages */}
       <div className="ft-chat-messages">
+        <OnboardingChatGuide
+          step={onboarding?.active ? onboarding.step : null}
+          onPrefill={setInput}
+          onToday={handleOnboardingToday}
+          onSkip={onboarding?.skip}
+        />
         <ProposalCards
           messages={messages}
           treeData={treeData}
@@ -380,6 +400,8 @@ export default function ChatPanel({
           onApplyDraftPlan={onApplyDraftPlan}
           onApplyPriorityAnalysis={onApplyPriorityAnalysis}
           onSelectNode={onSelectNode}
+          onboardingAttention={onboarding?.active && onboarding.proposalAttention}
+          onApplyAll={onOnboardingApplyAll}
         >
           {({ pendingCount: proposalCount, scrollToPending, applyAll, rejectAll, renderForMessage }) => (
             <>
@@ -390,7 +412,7 @@ export default function ChatPanel({
                   <Button size="sm" variant="quiet" onClick={rejectAll}>全部否决</Button>
                 </div>
               )}
-              {messages.map(msg => {
+              {displayMessages.map(msg => {
           // 周末回顾：特殊样式（更宽、不同背景）
           if (msg.kind === 'weekly_review') {
             return (

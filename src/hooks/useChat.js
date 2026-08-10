@@ -6,6 +6,8 @@ import { classifyIntent } from '../lib/intentClassifier'
 import { routeLocalQuery } from '../lib/agentRouter'
 import { collectPriorityAnalysisNodes } from '../lib/priorityAnalysis'
 import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
+import { formatReviewContent } from '../components/Views/reviewFormat.js'
+import { serializeReview } from '../lib/reviewSerialization.js'
 
 const WELCOME = {
   id: 'welcome',
@@ -597,7 +599,7 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
         const replyText = intent.special
           ? '✓ 已操作'
           : (intent.reply || (actionLogs.length
-              ? actionLogs.map(l => `✅ ${l}`).join('\n')
+              ? actionLogs.map(l => `[OK] ${l}`).join('\n')
               : '✓ 已处理'))
 
         const assistantMsg = {
@@ -1007,10 +1009,12 @@ export function useChat(user, treeActions, userGoal, model = 'auto') {
    */
   const injectReviewMessage = useCallback((review) => {
     if (!review) return
+    const parsed = formatReviewContent(review)
     const msg = {
       id: uuid(),
       role: 'assistant',
-      content: review.summary || '',
+      content: serializeReview(parsed),
+      parsed,
       kind: 'weekly_review',
       review_id: review.id || null,
     }

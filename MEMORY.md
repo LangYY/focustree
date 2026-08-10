@@ -159,3 +159,13 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - ListView now derives fixed 300px project columns from the existing tree model, flattens category descendants, sorts by direct priority, and filters all valid due states including `later`; cross-project drag is intentionally absent.
 - ReviewView renders the six-section review schema as a centered 680px slow-reading page. The server prompt forbids emoji, decorative symbols, and `---`; Views normalizes both new structured reviews and existing serialized summaries, stripping old decorations without changing the server schema.
 - Final local verification for this worktree: build passed, `npm test` 41/41 passed, lint 0 errors with the same 5 pre-existing hook warnings. No commit or deployment was performed; changes remain for acceptance.
+
+---
+
+## 2026-08-10 — Track E onboarding and two root fixes
+
+- 新手引导采用独立状态机（`src/lib/onboarding.js` + `useOnboarding` + `components/Onboarding`），把用户带过「表达混乱 → AI 提案 → 全部采纳 → 树生长 → 今日三件事」一轮；明确不做 tooltip tour、遮罩、气泡教学层或步骤计数器。提案卡只使用 accent 呼吸描边，生长后保留可见停顿并 fit-to-view。
+- 移除 `useTree` 对新用户自动写入旧三节点样例的行为，改为保持空树等待引导。示例数据单独生成 22 个节点并写入当前用户，阶段目标同时写入用户 profile；账户菜单提供重播、载入示例和清空入口。
+- 周回顾序列化抽到纯模块并改为干净文本小标题；聊天注入先解析结构再重新序列化，历史数据仍由 `reviewFormat.js` 清洗。补充序列化→解析往返和两条出口无 emoji 测试。
+- 恢复 Agent 请求 `temperature: 0.3`，模型契约测试锁定该参数。
+- 本轮验证：`npm test` 53/53、`npm run lint` 0 error（5 个既有 warning）、`npm run build` 通过。未提交、未部署，等待验收。

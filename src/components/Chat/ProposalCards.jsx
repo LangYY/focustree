@@ -26,6 +26,8 @@ export default function ProposalCards({
   onApplyDraftPlan,
   onApplyPriorityAnalysis,
   onSelectNode,
+  onboardingAttention = false,
+  onApplyAll,
   children,
 }) {
   const entries = useMemo(() => collectProposalEntries(messages, treeData, userGoal), [messages, treeData, userGoal])
@@ -130,6 +132,7 @@ export default function ProposalCards({
             proposals={overrides[entry.id] || entry.proposals}
             onOverride={value => setOverrides(current => ({ ...current, [entry.id]: value }))}
             preview={preview[entry.id] || []}
+            attention={onboardingAttention}
           />
         )
       })
@@ -146,7 +149,9 @@ export default function ProposalCards({
   }
 
   async function applyAll() {
+    if (!activeEntries.length) return
     for (const entry of activeEntries) await applyEntry(entry)
+    onApplyAll?.()
   }
 
   function rejectAll() {
@@ -156,10 +161,10 @@ export default function ProposalCards({
   return children?.({ pendingCount, activeEntries, scrollToPending, applyAll, rejectAll, renderForMessage }) || null
 }
 
-function ProposalEntry({ entry, open, busy, onToggle, onApply, onReject, onSelectNode, proposals, onOverride, preview }) {
+function ProposalEntry({ entry, open, busy, onToggle, onApply, onReject, onSelectNode, proposals, onOverride, preview, attention }) {
   const Icon = entry.type === 'draft' ? GitBranch : entry.type === 'goal' ? Target : Gauge
   return (
-    <article data-proposal-id={entry.id} className={`ft-proposal ${open ? 'is-open' : ''}`}>
+    <article data-proposal-id={entry.id} className={`ft-proposal ${open ? 'is-open' : ''} ${attention ? 'is-onboarding-attention' : ''}`}>
       <button type="button" className="ft-proposal-summary" onClick={onToggle}>
         <span className="ft-proposal-marker"><Icon size={15} /></span>
         <span className="ft-proposal-copy"><strong>{entry.summary}</strong><small>{entry.sourceLabel}</small></span>

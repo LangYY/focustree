@@ -16,7 +16,9 @@ import { useUserProfile } from './hooks/useUserProfile'
 import { useDailyFocus } from './hooks/useDailyFocus'
 import { useWeeklyReview } from './hooks/useWeeklyReview'
 import { useBackup } from './hooks/useBackup'
+import { useOnboarding } from './hooks/useOnboarding.js'
 import { DEFAULT_PROJECT_COLOR } from './lib/branchPalette'
+import { EXAMPLE_GOAL } from './lib/exampleData.js'
 import { getDerivedWeightMeta, getDerivedWeightMetaMap } from './lib/treeUtils'
 import { restoreAuthSession } from './lib/authSession'
 
@@ -118,7 +120,7 @@ export default function App() {
     treeData, loading: treeLoading,
     density, setDensity,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, annotateNode, updateNodeDetails, updateNodePlanning, moveNode, reorderNode, applyPriorityAnalyses,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, loadExampleData, annotateNode, updateNodeDetails, updateNodePlanning, moveNode, reorderNode, applyPriorityAnalyses,
     canUndo, canRedo, lastAction, nextAction, undo, redo,
   } = useTree(user)
 
@@ -169,6 +171,21 @@ export default function App() {
     recentSummaries, injectReviewMessage,
     applyPriorityAnalysis, requestPriorityAnalysis, applyDraftPlan,
   } = useChat(user, treeActions, goal)
+  const loadExample = useCallback(async () => {
+    const loaded = await loadExampleData()
+    if (!loaded) return false
+    const savedGoal = await setGoal(EXAMPLE_GOAL.text, EXAMPLE_GOAL)
+    return Boolean(savedGoal)
+  }, [loadExampleData, setGoal])
+  const onboarding = useOnboarding({
+    user,
+    treeData,
+    treeLoading,
+    messages,
+    onLoadExample: loadExample,
+    onOpenChat: () => setDrawerOpen(true),
+    fitToView: () => resetZoomRef.current?.(),
+  })
   const dailyFocus = useDailyFocus(user, treeData, goal, recentSummaries, learnedPatterns, hitRate)
   const weeklyReview = useWeeklyReview(user, goal, injectReviewMessage)
   const backup = useBackup(user, () => window.location.reload())
@@ -269,6 +286,10 @@ export default function App() {
   }, [])
 
   const handleSignOut = useCallback(() => supabase.auth.signOut(), [])
+  const handleClearAll = useCallback(async () => {
+    if (!window.confirm('确定要清空全部项目吗？此操作可撤销。')) return
+    await guardedClearAll()
+  }, [guardedClearAll])
   const handleApplyPriority = useCallback(async (...args) => {
     const result = await applyPriorityAnalysis(...args)
     setPriorityCalculationVersion(Date.now())
@@ -283,7 +304,10 @@ export default function App() {
       isOpen
       messages={messages}
       isLoading={chatLoading}
-      onSend={text => sendMessage(text, treeData, { selectedNodeId })}
+      onSend={text => {
+        onboarding.submitUserInput(text)
+        return sendMessage(text, treeData, { selectedNodeId })
+      }}
       goalText={goalText}
       goalExpired={goalExpired}
       onSetGoal={setGoal}
@@ -304,6 +328,9 @@ export default function App() {
       onRetry={() => retryLastMessage(treeData, { selectedNodeId })}
       onCancel={cancelRequest}
       pendingQueueCount={pendingQueue.length}
+      onboarding={onboarding}
+      onOnboardingToday={onboarding.sendTodayQuestion}
+      onOnboardingApplyAll={onboarding.applyAll}
     />
   )
 
@@ -333,8 +360,11 @@ export default function App() {
         onThemeChange={setThemeMode}
         onSignOut={handleSignOut}
         onAccount={() => openModal('memory')}
+        onLoadExample={onboarding.chooseExample}
+        onClearAll={handleClearAll}
+        onRestartOnboarding={onboarding.restart}
       >
-        {mode === 'tree' ? <CanvasStage theme={resolvedTheme} treeData={treeData} treeLoading={treeLoading} dailyFocus={dailyFocus} onNodeSelect={handleNodeSelect} onNodeToggle={node => toggleNode(node.id)} onContextAction={handleContextAction} resetZoomRef={resetZoomRef} highlightedNodeId={highlightedNodeId} onLeafAdd={createDefaultNode} onDropBranch={handleDropBranch} onRenameNode={renameNode} priorityCalculationVersion={priorityCalculationVersion} density={density} onDensityChange={setDensity} onExpandAll={expandAll} onCollapseAll={collapseAll} onExample={handlePrefill} userGoal={goal} layers={layers} onLayerChange={(key, value) => setLayers(current => ({ ...current, [key]: value }))} /> : null}
+        {mode === 'tree' ? <CanvasStage theme={resolvedTheme} treeData={treeData} treeLoading={treeLoading} dailyFocus={dailyFocus} onNodeSelect={handleNodeSelect} onNodeToggle={node => toggleNode(node.id)} onContextAction={handleContextAction} resetZoomRef={resetZoomRef} highlightedNodeId={highlightedNodeId} onLeafAdd={createDefaultNode} onDropBranch={handleDropBranch} onRenameNode={renameNode} priorityCalculationVersion={priorityCalculationVersion} density={density} onDensityChange={setDensity} onExpandAll={expandAll} onCollapseAll={collapseAll} onExample={handlePrefill} userGoal={goal} layers={layers} onLayerChange={(key, value) => setLayers(current => ({ ...current, [key]: value }))} onboarding={onboarding} /> : null}
         {mode === 'tree' && selectedNode ? <NodeInspector key={selectedNode.id} node={selectedNode} treeData={treeData} meta={selectedMeta} goal={goal} autoFocusTitle={inspectorFocusId === selectedNode.id} onAutoFocusHandled={() => setInspectorFocusId(null)} onClose={() => handleNodeSelect(null)} onSelectNode={handleNodeSelect} onRenameNode={renameNode} onUpdateDetails={updateNodeDetails} onUpdatePlanning={updateNodePlanning} onStatusChange={updateStatus} onRequestAnalysis={options => requestPriorityAnalysis(treeData, options)} analysisLoading={chatLoading} onRecalculate={() => setPriorityCalculationVersion(Date.now())} /> : null}
         {mode === 'focus' ? <FocusView focus={dailyFocus.focus} generating={dailyFocus.generating} onGenerate={dailyFocus.generate} onToggle={dailyFocus.toggleTask} onGoTree={() => setMode('tree')} /> : null}
         {mode === 'list' ? <ListView treeData={treeData} userGoal={goal} onStatusChange={updateStatus} onSelect={handleNodeSelect} /> : null}

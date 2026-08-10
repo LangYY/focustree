@@ -27,6 +27,9 @@ export default function AppShell({
   onThemeChange,
   onSignOut,
   onAccount,
+  onLoadExample,
+  onClearAll,
+  onRestartOnboarding,
 }) {
   return (
     <div className="ft-app-shell">
@@ -47,6 +50,9 @@ export default function AppShell({
         themeMode={themeMode}
         onThemeChange={onThemeChange}
         onSignOut={onSignOut}
+        onLoadExample={onLoadExample}
+        onClearAll={onClearAll}
+        onRestartOnboarding={onRestartOnboarding}
       />
       <div className="ft-app-body">
         <LeftRail

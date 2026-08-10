@@ -82,7 +82,7 @@ export default function BackupPanel({
             disabled={working}
             className="w-full px-3 py-2.5 rounded-lg ft-modal-bg-accent-40 ft-modal-hover-bg-accent-60 disabled:opacity-50 text-sm ft-modal-text-accent border ft-modal-border-accent-50 transition-colors text-left flex items-center justify-between"
           >
-            <span>📥 导出全部数据到文件</span>
+            <span>导出全部数据到文件</span>
             <span className="text-[11px] ft-modal-text-accent">.json</span>
           </button>
           <button
@@ -90,7 +90,7 @@ export default function BackupPanel({
             disabled={working}
             className="w-full px-3 py-2.5 rounded-lg ft-modal-bg-warn-30 ft-modal-hover-bg-warn-50 disabled:opacity-50 text-sm ft-modal-text-warn border ft-modal-border-warn-50 transition-colors text-left flex items-center justify-between"
           >
-            <span>📤 从文件恢复...</span>
+            <span>从文件恢复…</span>
             <span className="text-[11px] ft-modal-text-warn">会先自动备份现状</span>
           </button>
           <input

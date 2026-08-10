@@ -837,6 +837,7 @@ export function buildAgentRequestBody(systemPrompt, messages, modelName = 'deeps
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     max_tokens: 16000,
     reasoning_effort: 'max',
+    temperature: 0.3,
     response_format: { type: 'json_object' },
   }
 }

@@ -12,7 +12,7 @@ import {
   SAMPLE_DATA,
 } from '../lib/treeUtils'
 import { applyPriorityProposalsToTree, buildPriorityAnalysis } from '../lib/priorityProposals'
-import { DEFAULT_PROJECT_COLOR } from '../lib/branchPalette'
+import { buildExampleNodes } from '../lib/exampleData.js'
 
 const MAX_HISTORY = 30
 
@@ -67,20 +67,8 @@ export function useTree(user) {
     if (error) {
       console.error(error); setTreeData(SAMPLE_DATA)
     } else if (!data?.length) {
-      const initKey = `ft_init_${user.id}`
-      const alreadyInitialized = localStorage.getItem(initKey)
-
-      if (!alreadyInitialized) {
-        await seedSampleData(user.id)
-        localStorage.setItem(initKey, '1')
-        const { data: seeded } = await supabase
-          .from('nodes').select('*').eq('user_id', user.id).order('position')
-        setTreeData(flatToTree(enrichNodes(seeded || [])))
-      } else {
-        setTreeData(null)
-      }
+      setTreeData(null)
     } else {
-      localStorage.setItem(`ft_init_${user.id}`, '1')
       setTreeData(flatToTree(enrichNodes(data)))
     }
     setLoading(false)
@@ -681,6 +669,38 @@ export function useTree(user) {
     setTreeData(null)
   }, [user, treeData, pushHistory])
 
+  const loadExampleData = useCallback(async () => {
+    if (!user) return false
+
+    const { data: allNodes, error: fetchError } = await supabase
+      .from('nodes').select('*').eq('user_id', user.id)
+    if (fetchError) {
+      console.error('[loadExampleData] fetch:', fetchError.message)
+      return false
+    }
+
+    for (const node of sortByDepthDesc(allNodes || [])) {
+      const { error } = await supabase.from('nodes').delete()
+        .eq('id', node.id).eq('user_id', user.id)
+      if (error) {
+        console.error('[loadExampleData] delete', node.name, ':', error.message)
+        return false
+      }
+    }
+
+    const exampleRows = buildExampleNodes().map(node => ({ ...node, user_id: user.id }))
+    const { error: insertError } = await supabase
+      .from('nodes')
+      .insert(sortByParentFirst(exampleRows))
+    if (insertError) {
+      console.error('[loadExampleData] insert:', insertError.message)
+      return false
+    }
+
+    await loadNodes()
+    return true
+  }, [loadNodes, user])
+
   const updateNodePlanning = useCallback(async (nodeId, fields) => {
     if (!user || !nodeId || !fields) return
     const node = findNodeById(treeData, nodeId)
@@ -738,7 +758,7 @@ export function useTree(user) {
   return {
     treeData, loading, density, setDensity, leafView, setLeafView,
     expandAll, collapseAll, toggleNode,
-    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, moveNode, reorderNode,
+    addNode, renameNode, updateStatus, deleteNode, deleteNodeOnly, clearAll, loadExampleData, moveNode, reorderNode,
     annotateNode, updateNodeDetails, updateNodePlanning, applyPriorityAnalyses,
     reload: loadNodes,
     // 历史
@@ -871,7 +891,6 @@ function deleteNodeOnlyFromTree(tree, nodeId, orderedPositions = []) {
 
   return walk(tree)
 }
-
 /**
  * 把整个 subtree 从原父下剪掉，挂到新父下（targetParentId）。
  * 不修改子树本身的结构、不重置 expand 状态。targetParentId 为 null 时挂到根。
@@ -964,23 +983,4 @@ function reorderSiblingsInTree(tree, parentId, orderedPositions) {
   }
 
   return walk(tree)
-}
-
-// ── 新用户示例数据 ────────────────────────────────────
-
-async function seedSampleData(userId) {
-  const now = new Date().toISOString()
-
-  // 新用户只创建一个示例项目作为引导，保持界面干净
-  const { data: projects } = await supabase.from('nodes').insert([
-    { user_id: userId, name: '我的第一个项目', type: 'project', color: DEFAULT_PROJECT_COLOR, weight: 1.0, status: 'active', position: 1, expanded: true, last_active_at: now },
-  ]).select('id')
-
-  if (!projects?.[0]) return
-  const p1 = projects[0].id
-
-  await supabase.from('nodes').insert([
-    { user_id: userId, parent_id: p1, name: '点击右键可以添加子任务', type: 'task', status: 'active', weight: 0.8, position: 1, expanded: true, last_active_at: now },
-    { user_id: userId, parent_id: p1, name: '告诉 AI「我完成了 XX」它会帮你更新', type: 'task', status: 'active', weight: 0.6, position: 2, expanded: true, last_active_at: now },
-  ])
 }

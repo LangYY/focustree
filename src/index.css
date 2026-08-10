@@ -10,6 +10,7 @@
 @import "./components/Chat/chat.css";
 @import "./components/Modals/modalPanels.css";
 @import "./components/Tree/treePanels.css";
+@import "./components/Onboarding/onboarding.css";
 
 .node circle,
 .node path,

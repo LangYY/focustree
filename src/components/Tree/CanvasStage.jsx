@@ -2,6 +2,8 @@ import EmptyState from '../ui/EmptyState'
 import Legend from './Legend'
 import TodayPill from './TodayPill'
 import TreeView from './TreeView'
+import { ONBOARDING_STEPS } from '../../lib/onboarding.js'
+import { OnboardingDecision } from '../Onboarding/Onboarding.jsx'
 
 export default function CanvasStage({
   theme,
@@ -26,9 +28,19 @@ export default function CanvasStage({
   layers,
   onLayerChange,
   onLegendHover,
+  onboarding,
 }) {
   if (treeLoading) return <div className="ft-loading-state"><span className="ft-loading-line" />正在把树长出来…</div>
-  if (!treeData) return <EmptyState onExample={onExample} examples={['我现在同时在做三件事，有点乱', '帮我把这段项目描述整理成结构', '我这周该先做什么']} />
+  if (!treeData) {
+    if (onboarding?.active) {
+      return (
+        <div className="ft-canvas-stage ft-onboarding-empty-canvas">
+          {onboarding.step === ONBOARDING_STEPS.DECISION ? <OnboardingDecision {...onboardingDecisionProps(onboarding)} /> : null}
+        </div>
+      )
+    }
+    return <EmptyState onExample={onExample} examples={['我现在同时在做三件事，有点乱', '帮我把这段项目描述整理成结构', '我这周该先做什么']} />
+  }
   return (
     <div className="ft-canvas-stage">
       <TodayPill {...dailyFocus} />
@@ -54,6 +66,20 @@ export default function CanvasStage({
         onLegendHover={onLegendHover}
       />
       <Legend onHover={onLegendHover} />
+      {onboarding?.active && onboarding.step === ONBOARDING_STEPS.DECISION ? (
+        <div className="ft-onboarding-stage-layer">
+          <OnboardingDecision {...onboardingDecisionProps(onboarding)} />
+        </div>
+      ) : null}
     </div>
   )
+}
+
+function onboardingDecisionProps(onboarding) {
+  return {
+    onChooseReal: onboarding.chooseReal,
+    onChooseExample: onboarding.chooseExample,
+    onSkip: onboarding.skip,
+    exampleLoading: onboarding.exampleLoading,
+  }
 }

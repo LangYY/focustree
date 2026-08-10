@@ -8,6 +8,7 @@ export default function TopBar({
   goal, goalText, goalExpired, onEditGoal,
   user, canUndo, canRedo, lastAction, nextAction, onUndo, onRedo,
   onOpenModal, backupWarning, themeMode, onThemeChange, onSignOut,
+  onLoadExample, onClearAll, onRestartOnboarding,
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const initial = String(user?.email || 'F').slice(0, 1).toUpperCase()
@@ -70,6 +71,9 @@ export default function TopBar({
                 <MenuItem label="会话历史" onClick={() => { onOpenModal?.('history'); setMenuOpen(false) }} />
                 <MenuItem label="数据备份" onClick={() => { onOpenModal?.('backup'); setMenuOpen(false) }} />
                 <MenuItem label="整棵树审计" onClick={() => { onOpenModal?.('priorityAudit'); setMenuOpen(false) }} />
+                <MenuItem label="重新看一遍引导" onClick={() => { onRestartOnboarding?.(); setMenuOpen(false) }} />
+                <MenuItem label="载入示例数据" onClick={() => { onLoadExample?.(); setMenuOpen(false) }} />
+                <MenuItem label="清空全部" tone="danger" onClick={() => { onClearAll?.(); setMenuOpen(false) }} />
                 <div className="ft-menu-divider" />
                 <MenuItem label="退出登录" tone="danger" onClick={onSignOut} />
               </div>
