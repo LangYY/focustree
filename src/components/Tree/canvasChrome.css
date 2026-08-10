@@ -65,7 +65,7 @@
 .node-direct-glow { pointer-events: none; }
 .priority-change-pulse { vector-effect: non-scaling-stroke; }
 .ft-tree-exit-layer { opacity: 1; }
-.node-score-label { letter-spacing: .01em; }
+.node-label.is-done { text-decoration-line: line-through; text-decoration-thickness: 1px; text-decoration-color: currentColor; }
 .node-due-marker path { animation: ft-due-pulse 1.6s ease-in-out infinite; }
 @keyframes ft-due-pulse { 0%, 100% { opacity: .58; } 50% { opacity: 1; } }
 .node-urgent-mark { filter: drop-shadow(0 1px 2px var(--ft-canvas)); }

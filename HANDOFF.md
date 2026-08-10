@@ -1,5 +1,14 @@
 # HANDOFF
 
+## 当前任务收口（2026-08-10）
+
+- A/C/D 三条卫星轨道已在本工作树完成，未提交、未部署，等待用户验收。
+- A：认证页保留注册/密码登录，新增已实测为 magic link 的免密码入口、60 秒重发冷却和人话错误；演示入口采用“注册只需邮箱、约 30 秒”的方案二。
+- C：树标签改为项目/分类 16px 衬线、任务 12.5px 无衬线；两行最多 11 字、描边 2px、同层垂直贪心避让、done 删除线；数字分数标签与对应图层开关已移除，三条视觉通道保留。
+- D：清单已改为按顶层项目分列的 300px 横向看板；回顾改为 680px 慢阅读排版，服务端 prompt 禁止 emoji/装饰符号，旧序列化内容在 Views 层清洗为六段结构。
+- 并行会话拥有 `src/App.jsx`、`src/components/Shell/`、`src/components/Chat/`、`src/components/Drawer/`、`server/agent.js`；本轮未修改这些路径。
+- 最终本地验证：`npm run build` 通过，`npm test` 41/41 通过，`npm run lint` 0 errors / 5 个既有 hooks warnings。构建提示仍为 runtime-config.js 缺少 `type="module"` 和主 chunk 超过 500 kB。
+
 ## 当前部署修正（2026-08-09 23:20 +08:00）
 
 - 已确认根因不是本机缓存：旧入口请求 `/assets/BPqB6IAJ.js` 被 Express SPA fallback 以 200 `text/html` 返回，浏览器拒绝模块执行，`#root` 因此为空。
@@ -7,7 +16,7 @@
 - 新增 `test/legacyAssets.test.js`，实际启动 Express 验证旧 JS/CSS 返回当前资源、正确 MIME、非 HTML；`npm test` 23/23 通过。
 - 已用 `scripts/deploy-ecs.sh --full` 部署并重启服务；未修改 `.env`、数据库或 SQL。线上旧 JS/CSS 的响应体 SHA-256 分别与当前 bundle 一致，首页、资源和 `/health` 均通过，受控浏览器显示登录页。
 
-最后更新：2026-08-09。UI 重做基线、认证超时修复和 stale hashed asset 部署修复均已发布到 ECS，代码仍未提交。线上 readiness 仍有 `node_annotations` 数据库检查失败，详见线上部署。产品状态以本文件为准；历史决策写入 `MEMORY.md`。
+历史记录（2026-08-09）：UI 重做基线、认证超时修复和 stale hashed asset 部署修复已发布到 ECS；本文件顶部的 2026-08-10 任务收口是当前状态，历史决策写入 `MEMORY.md`。
 
 ## 当前状态
 
@@ -20,7 +29,7 @@
 - 树画布补齐新增/删除/完成/重排/分数变化动效、`prefers-reduced-motion` 降级、SVG treeitem 键盘导航和 ARIA；全局新增 `?` 快捷键说明浮层。
 - 晨纸主题使用 `--ft-text-primary` 暗晕与提高对比度的年轮；`src/` CSS 中除 base reduced-motion 规则外不再有 `!important`。
 - 认证启动改为有限等待：Supabase `getSession()` 8 秒超时后释放首屏 loading 并显示错误，晚到的合法 session 仍会接管用户状态；登录/注册请求 15 秒超时后释放按钮 loading。
-- 未修改 `server/`、优先级算法、分析协议、数据库及既有 hook 外部签名。旧组件仍保留必要的数据行为，但新 App 路径不再依赖旧 Toolbar/LeafView 页面。
+- 本轮未修改并行会话负责的 `server/agent.js`、优先级算法、分析协议、数据库及既有 hook 外部签名；仅按 D2 任务修改 `server/weeklyReview.js` 的 emoji/排版 prompt。旧组件仍保留必要的数据行为，但新 App 路径不再依赖旧 Toolbar/LeafView 页面。
 
 ## 关键文件
 
@@ -29,12 +38,13 @@
 - `src/components/Shell/`：TopBar、LeftRail、Drawer、AppShell。
 - `src/components/Tree/CanvasStage.jsx`、`TreeView.jsx`、`render/`：树画布与纯视觉计算。
 - `src/components/Views/`：Focus/List/Review 页面。
+- `src/components/Views/boardModel.js`、`reviewFormat.js`：看板列模型与回顾内容规范化。
 - `src/components/Drawer/`：Inbox/Audit/Utility 页面。
 - `src/lib/branchPalette.js`：项目枝干色板和明暗主题分支色计算。
 
 ## 验证
 
-- `npm test`：22/22 通过，包含认证初始化、认证请求超时和旧 hash 资产保留回归测试。
+- `npm test`：41/41 通过，包含认证入口、看板过滤、回顾格式清洗和树标签回归测试。
 - `npm run lint`：0 errors；5 个既有 React Hook exhaustive-deps warnings，集中在 `useChat.js`/`useWeeklyReview.js`。
 - `npm run build`：通过。Vite 提示 `runtime-config.js` 缺少 `type="module"`，并提示主 chunk 大于 500 kB；均为已有构建提示，不影响产物生成。
 - 浏览器冒烟已验证 `http://127.0.0.1:5173/` 能启动并进入配置提示页；当前 `.env` 的 Supabase/AI 值为空，无法在本地会话中验证登录后的真实树数据。
@@ -60,9 +70,9 @@ FocusTree 自身稳态占用：RSS 约 77 MB、CPU ~0%、磁盘 228 MB（其中 
 
 ## 后续
 
-1. 用户验收已部署但未提交的认证超时修复；如需回滚或再次发布，先确认远端前端目录与 readiness 状态。
-2. 配置本地 Supabase 与 AI 环境变量后，用真实账号验证登录、树数据、Inbox 应用和主题切换。
-3. 如需继续优化性能，再对主 chunk 做拆包；不改变当前交互和数据协议。
+1. 等待用户验收本工作树中的 A/C/D 变更；本轮不 commit、不部署。
+2. 另一个会话完成信息架构后，再由负责人统一验收左导轨名称与视图切换串联。
+3. 配置本地 Supabase 与 AI 环境变量后，可进一步做真实账号下的登录、看板和周回顾冒烟验证。
 ## 2026-08-09 — UI redesign follow-up (uncommitted)
 
 - Completed the four requested UI follow-up tasks: semantic color migration and legacy stylesheet removal, dead component cleanup with Audit analysis actions, reusable UI primitives, and the Inbox proposal workflow.

@@ -135,3 +135,13 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - The main code-level failure path is `useChat.sendMessage` awaiting the user-scoped `conversations` insert before `/api/agent`; the await is outside the later `try/finally` and has no timeout. A stalled/rejected session/network/RLS write can therefore leave loading active while no agent request is sent.
 - ECS logs also show provider intermittency: one request took about 46 seconds, and another received empty content twice before succeeding on retry 3. This is a slow/retry path, not a current provider outage.
 - Incident discriminator: no `/api/agent` means the pre-agent Supabase path; a long-pending `/api/agent` means provider latency/retries; a 200 JSON response moves the investigation to client response state/rendering. Full authenticated attribution requires a user-provided Network observation, not credentials.
+
+---
+
+## 2026-08-10 — A/C/D satellite tracks
+
+- Auth now has password sign-up/login plus a parallel magic-link login path. A real `signInWithOtp` call against the current public Supabase runtime config delivered a confirmation link email, not a six-digit code; the UI therefore uses a sent-link message and 60-second resend cooldown. Demo onboarding uses an explicit email guide because confirmation makes a random experience account unreliable.
+- Tree labels now use 16px serif for project/category and 12.5px sans for tasks, two lines capped at 11 characters each, 2px text stroke, same-depth greedy vertical avoidance, and done strike-through. Numeric score labels are gone while node size/glow, tapered branch, and rings remain.
+- ListView now derives fixed 300px project columns from the existing tree model, flattens category descendants, sorts by direct priority, and filters all valid due states including `later`; cross-project drag is intentionally absent.
+- ReviewView renders the six-section review schema as a centered 680px slow-reading page. The server prompt forbids emoji, decorative symbols, and `---`; Views normalizes both new structured reviews and existing serialized summaries, stripping old decorations without changing the server schema.
+- Final local verification for this worktree: build passed, `npm test` 41/41 passed, lint 0 errors with the same 5 pre-existing hook warnings. No commit or deployment was performed; changes remain for acceptance.

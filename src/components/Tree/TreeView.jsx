@@ -12,6 +12,7 @@ import { branchPath, centerLinePath } from './render/branchPath'
 import { branchWidth, glowMetrics, nodeAriaLabel, nodeRadius } from './render/nodeVisual'
 import { ringValues } from './render/growthRings'
 import { dueArcPath, dueColor } from './render/dueArc'
+import { layoutLabelPositions } from './render/labels'
 import ContextMenu from './ContextMenu'
 import NodeTooltip from './NodeTooltip'
 import CanvasControls from './CanvasControls'
@@ -207,11 +208,6 @@ function nodeStrokeWidth(d) {
 function nodeFilter(d) {
   if (d?.__isUrgent) return 'url(#ft-glow)'
   return null
-}
-
-function truncateLabel(value) {
-  const text = String(value || '')
-  return text.length > 22 ? `${text.slice(0, 22)}…` : text
 }
 
 function withDerivedWeightMeta(hNode) {
@@ -440,6 +436,10 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
 
     const nodes = root.descendants()
     const links = root.links()
+    const labelPositions = layoutLabelPositions(nodes, {
+      getRadius: nodeItem => getNodeRadius(nodeItem.data, nodeItem.__directPriority),
+      shouldShow: nodeItem => shouldShowLabel(nodeItem, density, zoomScale),
+    })
     const terminalLinks = links.filter(d =>
       d.target.data.type !== 'root' &&
       !(Array.isArray(d.target.data.children) && d.target.data.children.length > 0)
@@ -802,22 +802,34 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke-linecap', 'round')
       .attr('opacity', d => d.__dueState?.state === 'overdue' ? .85 : .72)
 
-    // 标签
-    node.filter(d => shouldShowLabel(d, density, zoomScale))
+    // 标签：顶层用衬线，末端用无衬线；分数只在检视卡显示。
+    node.filter(d => labelPositions.has(d.data.id))
       .append('text')
-      .attr('class', 'node-label')
-      .attr('x', d => getNodeRadius(d.data, d.__directPriority) + 10)
-      .attr('dy', '0.35em')
+      .attr('class', d => `node-label ${d.data.status === 'done' ? 'is-done' : ''}`)
+      .attr('x', d => labelPositions.get(d.data.id).x)
+      .attr('y', d => labelPositions.get(d.data.id).y)
       .attr('fill', 'var(--ft-text-primary)')
-      .attr('font-size', d => d.data.type === 'project' ? 13 : 11)
-      .attr('font-weight', d => d.data.type === 'project' ? 500 : 400)
+      .attr('font-family', d => labelPositions.get(d.data.id).fontFamily)
+      .attr('font-size', d => labelPositions.get(d.data.id).fontSize)
+      .attr('font-weight', d => labelPositions.get(d.data.id).fontWeight)
       .attr('paint-order', 'stroke fill')
       .attr('stroke', 'var(--ft-canvas)')
-      .attr('stroke-width', 3)
+      .attr('stroke-width', 2)
       .attr('stroke-linejoin', 'round')
       .attr('pointer-events', 'auto')
       .attr('opacity', d => previousById.has(d.data.id) ? 1 : 0)
       .style('cursor', 'pointer')
+      .each(function (d) {
+        const position = labelPositions.get(d.data.id)
+        const text = d3.select(this)
+        const firstDy = -((position.lines.length - 1) * position.lineHeight) / 2
+        position.lines.forEach((line, index) => {
+          text.append('tspan')
+            .attr('x', position.x)
+            .attr('dy', index === 0 ? firstDy : position.lineHeight)
+            .text(line)
+        })
+      })
       .on('click', (event, d) => {
         event.stopPropagation()
         setContextMenu(null)
@@ -827,26 +839,8 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         event.stopPropagation()
         onNodeToggleRef.current?.(d.data)
       })
-      .text(d => truncateLabel(d.data.name))
 
-    if (layers?.labels !== false) {
-      node.filter(d => d.data.type !== 'root' && shouldShowLabel(d, density, zoomScale))
-        .append('text')
-        .attr('class', 'node-score-label')
-        .attr('x', d => getNodeRadius(d.data, d.__directPriority) + 10)
-        .attr('y', 14)
-        .attr('fill', 'var(--ft-text-tertiary)')
-        .attr('font-family', 'var(--ft-font-mono)')
-        .attr('font-size', 9)
-        .attr('paint-order', 'stroke fill')
-        .attr('stroke', 'var(--ft-canvas)')
-        .attr('stroke-width', 3)
-        .attr('pointer-events', 'none')
-        .attr('opacity', d => previousById.has(d.data.id) ? 1 : 0)
-        .text(d => `d ${Math.round(d.__directPriority || 0)} · b ${Math.round(d.__branchPriority || 0)} · c ${Math.round(d.__cultivationScore || 0)}`)
-    }
-
-    node.selectAll('.node-label, .node-score-label')
+    node.selectAll('.node-label')
       .transition()
       .delay(motionDuration(420))
       .duration(motionDuration(220))
