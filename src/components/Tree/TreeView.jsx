@@ -718,7 +718,15 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => Math.min(1, ring.opacity * 2.2))
       })
 
-    node.selectAll('.node-main-circle')
+    const mainCircle = node.selectAll('.node-main-circle')
+    mainCircle
+      .on('mouseleave', function (event, d) {
+        d3.select(this).attr('r', getNodeRadius(d.data, d.__directPriority))
+        d3.select(this.parentNode).select('.node-main-plus').attr('opacity', 0)
+        d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => ring.opacity)
+      })
+
+    mainCircle
       .transition()
       .duration(motionDuration(420))
       .ease(d3.easeCubicOut)
@@ -726,11 +734,6 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('fill', d => nodeFill(d))
       .attr('stroke', d => d.data.status === 'dormant' ? (d.__displayColor || 'var(--ft-text-tertiary)') : nodeStrokeColor(d))
       .attr('opacity', d => nodeVisualOpacity(d))
-      .on('mouseleave', function (event, d) {
-        d3.select(this).attr('r', getNodeRadius(d.data, d.__directPriority))
-        d3.select(this.parentNode).select('.node-main-plus').attr('opacity', 0)
-        d3.select(this.parentNode).select('.node-growth-rings circle').attr('opacity', ring => ring.opacity)
-      })
 
     const doneMark = node.filter(d => d.data.status === 'done' && getNodeRadius(d.data, d.__directPriority) >= 8)
       .append('path')

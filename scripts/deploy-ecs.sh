@@ -77,6 +77,9 @@ $SSH "$HOST" "
   rm -rf dist.old
   [ -d dist ] && mv dist dist.old
   mv dist.new dist
+  if [ -d dist.old/assets ]; then
+    cp -an dist.old/assets/. dist/assets/
+  fi
 "
 
 # ── 5. 仅在服务端代码变化时重启 ────────────────────────

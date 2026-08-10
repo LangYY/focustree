@@ -20,6 +20,7 @@ import { useWeeklyReview } from './hooks/useWeeklyReview'
 import { useBackup } from './hooks/useBackup'
 import { DEFAULT_PROJECT_COLOR } from './lib/branchPalette'
 import { getDerivedWeightMeta, getDerivedWeightMetaMap } from './lib/treeUtils'
+import { restoreAuthSession } from './lib/authSession'
 
 const DELETE_CONFIRM_SHARE = 0.7
 const DELETE_CONFIRM_DIRECT_CHILDREN = 3
@@ -46,6 +47,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState(() => localStorage.getItem('ft_theme') || 'dark')
   const [resolvedTheme, setResolvedTheme] = useState(() => localStorage.getItem('ft_theme') === 'light' ? 'light' : 'dark')
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [authError, setAuthError] = useState('')
   const resetZoomRef = useRef(null)
   const backupRef = useRef(null)
   const userPinnedTabRef = useRef(false)
@@ -87,16 +89,38 @@ export default function App() {
         lastUserIdRef.current = nextUser?.id || null
         setUser(nextUser)
       }
+      if (nextUser) setAuthError('')
       if (markReady) setAuthLoading(false)
     }
-    supabase.auth.getSession().then(({ data: { session } }) => syncSession(session, true)).catch(error => {
-      console.error('[auth] getSession failed:', error)
-      if (mounted) setAuthLoading(false)
+
+    const stopSessionRestore = restoreAuthSession(supabase.auth, {
+      onSession: session => syncSession(session),
+      onReady: () => { if (mounted) setAuthLoading(false) },
+      onError: error => {
+        console.error('[auth] session restore failed:', error)
+        if (mounted) setAuthError(formatAuthError(error))
+      },
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event !== 'TOKEN_REFRESHED') syncSession(session, event === 'INITIAL_SESSION')
-    })
-    return () => { mounted = false; subscription.unsubscribe() }
+
+    let subscription = { unsubscribe: () => {} }
+    try {
+      const authState = supabase.auth.onAuthStateChange((event, session) => {
+        if (event !== 'TOKEN_REFRESHED') syncSession(session, event === 'INITIAL_SESSION')
+      })
+      subscription = authState?.data?.subscription || subscription
+    } catch (error) {
+      console.error('[auth] state listener failed:', error)
+      if (mounted) {
+        setAuthError(formatAuthError(error))
+        setAuthLoading(false)
+      }
+    }
+
+    return () => {
+      mounted = false
+      stopSessionRestore()
+      subscription.unsubscribe?.()
+    }
   }, [])
 
   const {
@@ -286,7 +310,7 @@ export default function App() {
   }, [applyPriorityAnalysis])
 
   if (authLoading) return <div className="ft-auth-loading"><span className="ft-loading-line" />载入中…</div>
-  if (!user) return <AuthPage />
+  if (!user) return <AuthPage initialError={authError} />
 
   const renderDrawerTab = tab => {
     if (tab === 'chat') return <ChatPanel isOpen messages={messages} isLoading={chatLoading} onSend={text => sendMessage(text, treeData, { selectedNodeId })} goalText={goalText} goalExpired={goalExpired} onSetGoal={setGoal} onClearGoal={clearGoal} model={model} onModelChange={handleModelChange} onResetConversation={resetConversation} onOpenHistory={() => openUtilityTab('history')} onOpenLearned={() => openUtilityTab('memory')} onOpenRecommendations={() => { reloadRecommendations(); openUtilityTab('recommendations') }} onOpenInbox={openInbox} hitRate={hitRate} treeData={treeData} onHoverNode={setHighlightedNodeId} onSelectNode={handleNodeSelect} onTriggerReview={() => weeklyReview.generate({ silent: false })} reviewGenerating={weeklyReview.generating} onRetry={() => retryLastMessage(treeData, { selectedNodeId })} onCancel={cancelRequest} pendingCount={pendingQueue.length} />
@@ -430,4 +454,9 @@ function countDescendants(node) {
 function isTypingTarget(element) {
   const tag = element?.tagName?.toLowerCase()
   return tag === 'input' || tag === 'textarea' || tag === 'select' || element?.isContentEditable
+}
+
+function formatAuthError(error) {
+  if (error?.code === 'AUTH_SESSION_TIMEOUT') return '登录服务响应超时，请检查网络后重试。'
+  return error?.message || '登录服务初始化失败，请重试。'
 }

@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { createClient } from '@supabase/supabase-js'
+import { readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runAgent } from './agent.js'
@@ -12,6 +13,19 @@ import { analyzePriorityNodes, estimatePriorityAnalysisTokens } from './priority
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.resolve(__dirname, '../dist')
+const LEGACY_INDEX_ASSET_RE = /^\/assets\/(?:index-[A-Za-z0-9_-]+|[A-Za-z0-9_]{8,})\.(js|css)$/
+
+function findCurrentIndexAsset(extension) {
+  const assetsDir = path.join(DIST_DIR, 'assets')
+  try {
+    const name = readdirSync(assetsDir).find((entry) => (
+      entry.startsWith('index-') && entry.endsWith(`.${extension}`)
+    ))
+    return name ? path.join(assetsDir, name) : null
+  } catch {
+    return null
+  }
+}
 
 const app = express()
 app.use(cors())
@@ -347,17 +361,42 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
-app.use(express.static(DIST_DIR))
+app.use(express.static(DIST_DIR, {
+  setHeaders: (res, filePath) => {
+    if (filePath === path.join(DIST_DIR, 'index.html')) {
+      res.setHeader('Cache-Control', 'no-store')
+    }
+  },
+}))
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(DIST_DIR, 'index.html'))
+app.get(LEGACY_INDEX_ASSET_RE, (req, res) => {
+  const extension = path.extname(req.path).slice(1)
+  const currentAsset = findCurrentIndexAsset(extension)
+  if (!currentAsset) return res.sendStatus(404)
+
+  res
+    .type(extension === 'js' ? 'text/javascript' : 'text/css')
+    .set('Cache-Control', 'no-store')
+    .sendFile(currentAsset)
 })
 
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(DIST_DIR, 'index.html'))
-})
+const sendIndex = (req, res) => {
+  res
+    .set('Cache-Control', 'no-store')
+    .sendFile(path.join(DIST_DIR, 'index.html'))
+}
+
+app.get('/', sendIndex)
+
+app.get(/^(?!\/api).*/, sendIndex)
 
 const PORT = process.env.PORT || 3001
-app.listen(PORT, () => {
-  console.log(`🤖 Agent server running on http://localhost:${PORT}`)
+export { app }
+
+const isMainModule = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isMainModule) {
+  app.listen(PORT, () => {
+    console.log(`🤖 Agent server running on http://localhost:${PORT}`)
 })
+}

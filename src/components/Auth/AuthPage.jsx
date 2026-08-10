@@ -1,14 +1,19 @@
 import { ArrowRight, Leaf, LockKeyhole, Mail, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase, supabaseConfig } from '../../lib/supabase'
+import { withAuthTimeout } from '../../lib/authSession'
 
-export default function AuthPage() {
+export default function AuthPage({ initialError = '' }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (initialError) setError(initialError)
+  }, [initialError])
 
   if (!supabaseConfig.isConfigured) return <MissingConfig />
 
@@ -19,16 +24,16 @@ export default function AuthPage() {
     setLoading(true)
     try {
       if (mode === 'login') {
-        const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+        const { error: authError } = await withAuthTimeout(() => supabase.auth.signInWithPassword({ email, password }))
         if (authError) throw authError
       } else {
-        const { error: authError } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } })
+        const { error: authError } = await withAuthTimeout(() => supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } }))
         if (authError) throw authError
         setMessage('注册成功！请检查邮箱验证链接，然后回来登录。')
         setMode('login')
       }
     } catch (authError) {
-      setError(authError.message || '操作失败，请重试')
+      setError(formatAuthError(authError))
     } finally {
       setLoading(false)
     }
@@ -52,6 +57,11 @@ export default function AuthPage() {
       </main>
     </div>
   )
+}
+
+function formatAuthError(error) {
+  if (error?.code === 'AUTH_REQUEST_TIMEOUT') return '登录请求超时，请检查网络后重试。'
+  return error?.message || '操作失败，请重试'
 }
 
 function MissingConfig() {

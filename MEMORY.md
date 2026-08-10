@@ -72,3 +72,66 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - TreeView 保持既有 D3 交互层，只在视觉渲染层加入路径生长/收回、节点半径与标签过渡、完成勾线、布局 transition 和最多三个分数变化脉冲；`prefers-reduced-motion` 同时由 CSS 和 D3 duration 降级。
 - 晨纸主题的直接优先级辉光采用 `--ft-text-primary` 暗晕（opacity 乘 0.58，blur 3.5），年轮采用 `--ft-text-secondary`（opacity 乘 1.65，上限 0.85）；实测文字对 surface 为深色 14.72/7.86/4.06、浅色 14.16/5.90/3.03，浅色分支色最低 4.02。
 - 本轮不提交、不部署；本地浏览器仅能进入配置提示页，因为 `.env` 未提供 Supabase/AI 配置。
+
+---
+
+## 2026-08-09 — Auth 初始化超时修复
+
+- 根因：`App.jsx` 只等待 `supabase.auth.getSession()` resolve/reject 或 `INITIAL_SESSION` 事件，没有超时；Supabase 会话恢复卡在网络请求或内部锁时，`authLoading` 永远保持 `true`。认证表单的 `signInWithPassword`/`signUp` 也没有请求超时，按钮会永久处于处理中。
+- 修复：新增 `src/lib/authSession.js`。会话恢复 8 秒后释放首屏 loading 并显示错误；晚到的 session 仍可更新用户。认证提交请求 15 秒后拒绝，确保表单 finally 能恢复。
+- 回归测试：`test/authBootstrap.test.js` 覆盖永不 resolve 的 session restore 和 auth request 两条链路；最终全量测试 21/21 通过。
+- 线上浏览器探测在 30 秒内超时，属于需要另外检查 ECS/systemd/Nginx 可达性的部署前事项；本轮只改仓库代码，未部署。
+
+---
+
+## 2026-08-09 — Auth 修复前端部署
+
+- 本地 `npm run build` 成功，产物为 `dist/index.html`、`dist/assets/index-mtElzF47.css`、`dist/assets/index-C4qR1G-k.js`；Windows 默认 WSL `bash.exe` 因 `E_ACCESSDENIED` 导致第一次脚本调用超时，未触碰 ECS，改用已安装的 Git Bash 后按原脚本无参数部署成功。
+- 部署完成时间：2026-08-09 21:45:51 +08:00；脚本耗时约 3.13 秒。只上传前端 `dist`，未使用 `--full`，未覆盖线上 `.env`，未重启服务。脚本内 `/health` 200，远端 `dist/index.html` 哈希与本地一致。
+- 线上额外验证：首页 200、`/health` 200；`/readiness` 503，唯一失败项是 `node_annotations` 数据库查询检查，响应没有错误 message。该项需要人工检查 Supabase 表/权限或执行现有 `sql/002_annotations_and_log.sql`，不应通过再次部署前端解决。
+
+---
+
+## 2026-08-09 — Stale hashed asset 根因与部署修复
+
+- 根因：旧 `index.html` 仍可能引用已被原子部署删除的 hash bundle；缺失 `/assets/*.js` 被 `server/index.js` 的全量 SPA fallback 返回为当前 `index.html`（200 + `text/html`），浏览器拒绝模块执行，React 不挂载，只留下 `#root:empty::after` 绿色点。Nginx 没有 `proxy_cache`，首页/资产是 `public, max-age=0`，`runtime-config.js` 是 `no-store`。
+- 修复：`scripts/deploy-ecs.sh` 切换 `dist` 后以 `cp -an dist.old/assets/. dist/assets/` 保留上一版 hash 资产；新增 `test/deployAssets.test.js` 锁定该部署契约。未修改服务端、数据库或线上 `.env`。
+- 验证：`npm test` 22/22、`npm run lint` 0 errors/5 个既有 warnings、`npm run build` 通过。2026-08-09 22:43:15 +08:00 通过无参数前端-only 部署，脚本内 `/health` 200，耗时约 3.43 秒，未重启服务。
+- 部署后当前 bundle、首页、`/health` 均 200；历史 `BPqB6IAJ`/`QQUu0Bzt` URL 虽为 200，但仍返回 HTML，因为它们在本次修复前已被清理，未重复部署或直接写入线上恢复旧文件。后续版本切换会保留上一版资产，避免新产生同类断链。
+
+---
+
+## 2026-08-09 — Legacy hashed asset server fallback
+
+- Root cause was confirmed on the public path: a missing old entry such as `/assets/BPqB6IAJ.js` fell through Express SPA routing and returned the current `index.html` with 200 `text/html`, so the browser rejected the module and left `#root` empty.
+- `server/index.js` now recognizes only root-level hashed entry-shaped `.js/.css` paths, maps them to the current same-extension `index-*` asset with explicit MIME and `no-store`, and never maps unrelated asset paths to a bundle. Index and SPA fallback responses are also `no-store`.
+- `test/legacyAssets.test.js` exercises the real Express app and verifies old JS/CSS bodies, MIME types, status, and non-HTML content. Standard `npm test` passed 23/23; lint has 0 errors and 5 existing hook warnings; build and `node --check server/index.js` passed.
+- `scripts/deploy-ecs.sh --full` uploaded `server/` and `dist`, installed production dependencies, restarted `focustree.service`, and passed `/health`. Public probes returned 200 for home/current assets/legacy assets/health; legacy JS and CSS hashes matched their current counterparts. No `.env`, database, or SQL execution was changed.
+
+---
+
+## 2026-08-09 — Local render investigation (temporary changes removed)
+
+- With a local-only test identity, the app passed the auth gate but the controlled browser showed `#root` with zero children.
+- The first fatal render error was `src/components/Tree/TreeView.jsx:729`: D3 transition `.on('mouseleave', ...)` throws `unknown type: mouseleave`, and React reports a TreeView render error.
+- The offline Supabase query double also lacks `.limit()`, producing unhandled rejections in `src/hooks/useChat.js` and `src/hooks/useWeeklyReview.js`; profile/focus hooks settle after reporting missing config.
+- The temporary local files, code, instrumentation, process, logs, and screenshot were removed. No cloud, database, deployment, or commit changed.
+
+---
+
+## 2026-08-10 — TreeView hover binding fix
+
+- The blank authenticated shell was caused by `mouseleave` being registered after `.transition()`, which made D3 treat it as an invalid transition event and throw `unknown type: mouseleave`.
+- `TreeView.jsx` now binds the exit handler on the `.node-main-circle` selection before applying the existing animation. `test/treeViewEvents.test.js` proves the old source fails and the fixed source passes.
+- Controlled local browser evidence: `#root` child count `1`, tree role present, and `4` rendered nodes; no TreeView error. Full verification passed with `npm test` 24/24, lint 0 errors / 5 existing warnings, and build success.
+- Temporary local auth files, processes, browser pages, and logs were removed. No cloud, database, deployment, or commit changed.
+
+---
+
+## 2026-08-10 — AI assistant no-response investigation
+
+- No code, deployment, database, cloud `.env`, credentials, or commit was changed. The controlled browser remained unauthenticated.
+- The public `/health` and `/readiness` endpoints returned 200 with LLM/Supabase configuration and all checked tables healthy. A bounded synthetic `/api/agent` probe returned a non-empty DeepSeek JSON reply in about 7.8 seconds.
+- The main code-level failure path is `useChat.sendMessage` awaiting the user-scoped `conversations` insert before `/api/agent`; the await is outside the later `try/finally` and has no timeout. A stalled/rejected session/network/RLS write can therefore leave loading active while no agent request is sent.
+- ECS logs also show provider intermittency: one request took about 46 seconds, and another received empty content twice before succeeding on retry 3. This is a slow/retry path, not a current provider outage.
+- Incident discriminator: no `/api/agent` means the pre-agent Supabase path; a long-pending `/api/agent` means provider latency/retries; a 200 JSON response moves the investigation to client response state/rendering. Full authenticated attribution requires a user-provided Network observation, not credentials.
