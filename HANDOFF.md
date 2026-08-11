@@ -2,11 +2,11 @@
 
 当前项目状态的唯一事实来源。信息过时就直接替换，不要堆积历史（历史进 `MEMORY.md`）。
 
-最后更新：2026-08-10。
+最后更新：2026-08-11。
 
 ## 当前分支
 
-`feature/priority-engine-v2`。本轮轨道 E 已完成代码与本地验证，**尚未 git commit，尚未部署，等待验收**。
+`feature/priority-engine-v2`。本轮轨道 E 已完成代码与本地验证，当前 `HEAD` 为已有提交 `dbe3756`，工作树干净；本次发布尝试未新增提交。
 
 ## 当前架构
 
@@ -42,4 +42,12 @@
 
 ## 下一步
 
-等待用户验收。验收通过后再按部署流程处理；当前不要提交或部署。
+用户已验收并授权发布。2026-08-11 使用 `scripts/deploy-ecs.sh --full` 成功发布到 `focus.buzzegg.cn`：
+
+- 前端 `dist`、`server/` 和生产依赖已同步，`focustree.service` 已重启并保持 active。
+- 部署脚本自带 `/health 200` 通过；随后 `npm run cloud:smoke -- https://focus.buzzegg.cn --require-readiness` 全部通过（health、readiness、runtime config、首页、SPA fallback）。
+- 浏览器 canary 加载登录页成功，HTTP 200、页面 readyState complete、标题「专注树」、关键登录/注册文案和截图均正常；本次未使用账户执行认证后流程。
+- 首次 readiness 检查曾短暂返回 `priority_analysis_runs` 503，立即重跑已恢复 200，当前数据库表检查全部通过。
+- 远端 `npm ci --omit=dev` 报告 5 个既有依赖漏洞（1 low、1 moderate、1 high、2 critical），未在发布中自动修复。
+
+当前线上已可用，等待用户验收；本次未新增 commit，交接文档和部署报告仍保持未提交状态。

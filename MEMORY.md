@@ -169,3 +169,17 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 周回顾序列化抽到纯模块并改为干净文本小标题；聊天注入先解析结构再重新序列化，历史数据仍由 `reviewFormat.js` 清洗。补充序列化→解析往返和两条出口无 emoji 测试。
 - 恢复 Agent 请求 `temperature: 0.3`，模型契约测试锁定该参数。
 - 本轮验证：`npm test` 53/53、`npm run lint` 0 error（5 个既有 warning）、`npm run build` 通过。未提交、未部署，等待验收。
+
+## 2026-08-11 — Track E 发布尝试
+
+- 用户已验收并授权发布。当前分支 `feature/priority-engine-v2` 的 `HEAD` 为已有提交 `dbe3756`；本次发布尝试未新增提交。
+- 按 `scripts/deploy-ecs.sh --full` 进行了多次尝试。WSL 首先暴露默认 `$HOME` 下密钥路径问题，改用 `/mnt/c/Users/XTIA/.ssh/focustree_ecs_ed25519` 后仍在 SSH banner 阶段超时；Git Bash 使用 `/c/Users/XTIA/.ssh/focustree_ecs_ed25519` 及 Windows 原生 OpenSSH 也复现同一问题。
+- `focus.buzzegg.cn` 解析到部署脚本中的 `8.153.96.57`；22/443 TCP 端口可达，但 SSH banner、HTTPS `/health` 和项目 `cloud:smoke --require-readiness` 均未完成协议握手，后者返回 `fetch failed`。
+- 脚本每次都在第一个远端 SSH 命令前退出，因此未确认发生线上 `dist` 切换、`server/` 上传、生产依赖安装或 systemd 重启。待 ECS SSH/Nginx/网络入口恢复后再重试完整发布。
+
+## 2026-08-11 — Track E 发布成功
+
+- ECS 入口恢复后，用 Git Bash 和 `FT_KEY=/c/Users/XTIA/.ssh/focustree_ecs_ed25519` 重试 `scripts/deploy-ecs.sh --full` 成功：本地构建、dist 上传、server 上传、`npm ci --omit=dev`、dist 原子切换、`focustree.service` 重启及脚本 `/health 200` 全部完成。
+- 远端生产依赖安装报告 5 个漏洞（1 low、1 moderate、1 high、2 critical）；本次未自动执行 `npm audit fix`，避免改变发布范围。
+- 发布后项目 smoke 全部通过：`/health`、`/readiness`、`/runtime-config.js`、首页和 SPA fallback 均正常。第一次 readiness 瞬间返回 `priority_analysis_runs` 503，立即重跑恢复 200，所有表检查通过。
+- 受管浏览器 canary 通过：登录页 HTTP 200、约 896ms 完成 DOM、标题「专注树」、登录/注册关键文案正常，并已保存截图。未使用账户执行认证后新手引导流程。
