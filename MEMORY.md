@@ -192,3 +192,13 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 标签宽度改为像素上限：按下一层实际水平间距的约 `0.5` 倍计算，叶节点回退到 `NODE_H_GAP`；`estimateTextWidth` 驱动最多两行省略号，碰撞候选只读当前深度及相邻深度。500 个合成节点布局抽样约 `8.38ms`，没有全树扫描。
 - 探索性切线方案保留：`branchTangent` 在枝干 `t=0.88` 处求单位切线，标签锚点沿切线偏移 8px，不旋转文字，并让碰撞布局使用偏移后的盒子。真实生产 `TreeView` 浏览器验证了晨纸/林夜、缩放、平移、展开全部/折叠全部和拖拽预览；22 个标签无碰撞，切线对比平均垂直偏移约 `1.2px`，未见抖动，因此保留。
 - 新增标签/视觉回归测试后，全量 `npm test` 为 `58/58`；`npm run lint` 为 0 error、5 个既有 hook warning；`npm run build` 通过并保留既有 runtime-config 与大 chunk warning。未新增依赖、未提交、未部署；`.codex-task.md` 与临时浏览器实验文件已删除。
+
+---
+
+## 2026-08-11 — `/readiness` 瞬态 503 独立诊断与端点级缓解
+
+- `server/index.js` 的 Supabase service-role client 是模块级单例，没有自定义 fetch、连接池、keep-alive 或数据库超时设置；`/readiness` 原先用 `Promise.all` 并发检查 10 张表，任一单次错误都会直接把整个探测标成 503。
+- 锁定依赖 `@supabase/supabase-js@2.105.4` 的 PostgREST 实现默认使用 Node 全局 fetch；在当前 Node 24.14.0 中对应内置 Undici 7.21.0，而不是项目直接安装的 Undici 8.3.0。SDK 默认重试网络错误和 503/520，但不重试 502。
+- 本地诊断脚本模拟了空闲连接与突发并发：全局 fetch 约 1 秒后已主动释放 idle socket，未复现长时间空闲复用失效连接；人为断开 socket 后 SDK 默认重试成功，底层错误对象为非空 `TypeError: fetch failed`，包含 `UND_ERR_SOCKET` cause。模拟 502 空响应体时得到真实的 `{ message: '' }`，同表立即重试恢复 200。结论是支持偶发上游 HTTP/连接瞬态方向，但不支持把具体根因断言为 stale idle socket。
+- 对公网 `/readiness` 做了 113 次只读 curl 探测，捕获 1 次 HTTP 503 后立即恢复，其他请求 200；受限于不访问生产日志/凭据，未能从该次失败响应确认失败表名。固定表权限/RLS/表存在性没有表现出间歇性证据。
+- `/readiness` 现对每张表增加一次 200ms 延迟的局部重试；两次失败才返回失败，并记录表名、name、code、message、status。`test/readiness.test.js` 覆盖空 message 首次失败后成功，以及连续失败仍保留错误和日志。全量 `npm test` 60/60、lint 0 error（5 个既有 warning）、build 通过；未新增依赖、未 commit、未部署。

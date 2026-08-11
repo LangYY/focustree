@@ -57,6 +57,7 @@ console.log(`[llm] provider=${LLM_PROVIDER}`)
 
 // 服务端 supabase client（bypass RLS，用 service role）
 const supa = (SUPA_URL && SUPA_KEY) ? createClient(SUPA_URL, SUPA_KEY) : null
+const READINESS_RETRY_DELAY_MS = 200
 
 app.get('/health', (req, res) => {
   res.json({
@@ -89,11 +90,34 @@ app.get('/readiness', async (req, res) => {
   if (supa) {
     result.database.checked = true
     await Promise.all(REQUIRED_TABLES.map(async (table) => {
-      const { error } = await supa
-        .from(table)
-        .select('user_id', { head: true, count: 'exact' })
-        .limit(1)
-      tables[table] = error ? { ok: false, message: error.message } : { ok: true }
+      let queryResult = null
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          queryResult = await supa
+            .from(table)
+            .select('user_id', { head: true, count: 'exact' })
+            .limit(1)
+        } catch (error) {
+          queryResult = { error, status: error?.status }
+        }
+
+        if (!queryResult.error) {
+          tables[table] = { ok: true }
+          return
+        }
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, READINESS_RETRY_DELAY_MS))
+      }
+
+      const error = queryResult.error
+      const errorInfo = {
+        table,
+        name: error?.name || '',
+        code: error?.code || '',
+        message: error?.message || '',
+        status: queryResult.status ?? error?.status ?? 0,
+      }
+      console.warn('[/readiness] table check failed', errorInfo)
+      tables[table] = { ok: false, message: errorInfo.message }
     }))
     result.database.ok = Object.values(tables).every(item => item.ok)
   }

@@ -50,3 +50,9 @@
 ## 下一步
 
 等待用户验收本轮树画布视觉精修。`.codex-task.md` 与临时浏览器实验文件已删除；本轮未新增 commit、未部署。
+
+## 2026-08-11 — `/readiness` 间歇性 503 独立诊断
+
+- `server/index.js` 的 `supa` 确认为模块级 service-role 单例，未配置自定义 fetch、keep-alive 或数据库超时；`/readiness` 原先并发检查 10 张表，单表一次失败就把整体响应变成 503。`@supabase/supabase-js` 锁定为 2.105.4，Node 24 使用内置 Undici 7.21.0；PostgREST 默认只覆盖网络错误、503/520 的 SDK 重试，不覆盖本地复现的 502 空响应。
+- 本地空闲实验中，Node 24 全局 fetch 约 1 秒就释放 idle keep-alive，未复现长时间闲置后复用失效连接；人为断开 socket 时 SDK 默认重试成功，错误对象为非空 `TypeError: fetch failed`。模拟 502 空响应则精确得到 `error.message === ''`，下一次请求恢复 200。公网 curl 只读探测共 113 次，捕获 1 次瞬态 503，随后立即恢复；其余窗口均 200，无法在不接触生产日志/凭据的前提下确认失败表名。
+- 针对性修复只在 `/readiness` 内增加每表一次、200ms 延迟的有界重试；两次失败才返回 `ok:false`，并通过 `console.warn` 记录表名、错误 name/code/message/status。新增 `test/readiness.test.js` 覆盖重试后成功和重试后仍失败两条路径。`npm test` 60/60 通过，`npm run lint` 0 error、5 个既有 warning，`npm run build` 通过并保留既有 Vite 提示。未新增依赖、未 commit、未部署，等待验收。
