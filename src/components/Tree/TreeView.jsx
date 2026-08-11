@@ -8,7 +8,7 @@ import {
   isUrgentPriority,
 } from '../../lib/treeUtils'
 import { resolveBranchBaseColor, shadeBranchColor } from '../../lib/branchPalette'
-import { branchPath, centerLinePath } from './render/branchPath'
+import { branchPath, branchTangent, centerLinePath } from './render/branchPath'
 import { branchWidth, glowMetrics, nodeAriaLabel, nodeRadius } from './render/nodeVisual'
 import { ringValues } from './render/growthRings'
 import { dueArcPath, dueColor } from './render/dueArc'
@@ -20,6 +20,9 @@ import CanvasControls from './CanvasControls'
 const MARGIN = { top: 20, right: 120, bottom: 20, left: 60 }
 const NODE_H_GAP = 220
 const NODE_V_GAP = 48
+const LABEL_MAX_WIDTH_RATIO = 0.5
+const LABEL_TANGENT_T = 0.88
+const LABEL_TANGENT_DISTANCE = 8
 const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
@@ -135,7 +138,7 @@ function assignBranchVisuals(root, theme) {
     node.__branchBaseColor = baseColor
     node.__branchDepth = branchDepth
     node.__displayColor = shadeBranchColor(baseColor, branchDepth, node.data.status, theme)
-    node.__glowColor = theme === 'light' ? 'var(--ft-text-primary)' : node.__displayColor
+    node.__glowColor = node.__displayColor
     node.__glowOpacityScale = theme === 'light' ? .58 : 1
     node.__ringStroke = theme === 'light' ? 'var(--ft-text-secondary)' : node.__displayColor
     node.__ringOpacityScale = theme === 'light' ? 1.65 : 1
@@ -439,6 +442,20 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
     const labelPositions = layoutLabelPositions(nodes, {
       getRadius: nodeItem => getNodeRadius(nodeItem.data, nodeItem.__directPriority),
       shouldShow: nodeItem => shouldShowLabel(nodeItem, density, zoomScale),
+      getMaxWidth: nodeItem => {
+        const nextLayerNode = nodeItem.children?.[0]
+        const measuredGap = nextLayerNode ? nextLayerNode.y - nodeItem.y : NODE_H_GAP
+        const layerGap = Number.isFinite(measuredGap) && measuredGap > 0 ? measuredGap : NODE_H_GAP
+        return layerGap * LABEL_MAX_WIDTH_RATIO
+      },
+      getAnchorOffset: nodeItem => {
+        if (!nodeItem.parent) return { x: 0, y: 0 }
+        const tangent = branchTangent({ source: nodeItem.parent, target: nodeItem }, LABEL_TANGENT_T)
+        return {
+          x: tangent.x * LABEL_TANGENT_DISTANCE,
+          y: tangent.y * LABEL_TANGENT_DISTANCE,
+        }
+      },
     })
     const terminalLinks = links.filter(d =>
       d.target.data.type !== 'root' &&

@@ -183,3 +183,12 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 远端生产依赖安装报告 5 个漏洞（1 low、1 moderate、1 high、2 critical）；本次未自动执行 `npm audit fix`，避免改变发布范围。
 - 发布后项目 smoke 全部通过：`/health`、`/readiness`、`/runtime-config.js`、首页和 SPA fallback 均正常。第一次 readiness 瞬间返回 `priority_analysis_runs` 503，立即重跑恢复 200，所有表检查通过。
 - 受管浏览器 canary 通过：登录页 HTTP 200、约 896ms 完成 DOM、标题「专注树」、登录/注册关键文案正常，并已保存截图。未使用账户执行认证后新手引导流程。
+
+---
+
+## 2026-08-11 — 树画布视觉精修
+
+- 晨纸主题的 direct glow 不再强制使用 `--ft-text-primary` 暗晕。浏览器对比确认旧方案在米白底上更像阴影/污渍；现在两个主题都使用节点自身的 `__displayColor`，晨纸保留 `0.58` opacity 折减，`stdDeviation = 3.5` 和年轮通道不变。对应判断已先写回 `DESIGN.md`。
+- 标签宽度改为像素上限：按下一层实际水平间距的约 `0.5` 倍计算，叶节点回退到 `NODE_H_GAP`；`estimateTextWidth` 驱动最多两行省略号，碰撞候选只读当前深度及相邻深度。500 个合成节点布局抽样约 `8.38ms`，没有全树扫描。
+- 探索性切线方案保留：`branchTangent` 在枝干 `t=0.88` 处求单位切线，标签锚点沿切线偏移 8px，不旋转文字，并让碰撞布局使用偏移后的盒子。真实生产 `TreeView` 浏览器验证了晨纸/林夜、缩放、平移、展开全部/折叠全部和拖拽预览；22 个标签无碰撞，切线对比平均垂直偏移约 `1.2px`，未见抖动，因此保留。
+- 新增标签/视觉回归测试后，全量 `npm test` 为 `58/58`；`npm run lint` 为 0 error、5 个既有 hook warning；`npm run build` 通过并保留既有 runtime-config 与大 chunk warning。未新增依赖、未提交、未部署；`.codex-task.md` 与临时浏览器实验文件已删除。

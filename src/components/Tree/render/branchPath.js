@@ -30,6 +30,26 @@ export function centerLinePath(link) {
   return `M${source.y},${source.x} C${midX},${source.x} ${midX},${target.x} ${target.y},${target.x}`
 }
 
+export function branchTangent(link, t = 0.88) {
+  const source = link?.source
+  const target = link?.target
+  if (!source || !target) return { x: 1, y: 0 }
+
+  const p0 = { x: source.y, y: source.x }
+  const p1 = { x: target.y, y: target.x }
+  const midX = p0.x + (p1.x - p0.x) * 0.5
+  const amount = Math.max(0, Math.min(1, Number(t) || 0))
+  const tangent = cubicTangent(
+    p0,
+    { x: midX, y: p0.y },
+    { x: midX, y: p1.y },
+    p1,
+    amount,
+  )
+  const length = Math.hypot(tangent.x, tangent.y) || 1
+  return { x: tangent.x / length, y: tangent.y / length }
+}
+
 function cubicPoint(p0, c0, c1, p1, t) {
   const mt = 1 - t
   return {

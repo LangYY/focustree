@@ -6,7 +6,7 @@
 
 ## 当前分支
 
-`feature/priority-engine-v2`。本轮轨道 E 已完成代码与本地验证，当前 `HEAD` 为已有提交 `dbe3756`，工作树干净；本次发布尝试未新增提交。
+`feature/priority-engine-v2`。当前 `HEAD` 为已有提交 `9cfa989`；轨道 E 已完成并已发布。本轮树画布视觉精修已完成本地实现与验证，工作树保留未提交改动，未 commit、未部署，等待用户验收。
 
 ## 当前架构
 
@@ -21,7 +21,7 @@
 
 - `src/lib/exampleData.js` 生成 22 个当前用户节点：3 project、6 category、13 task，三条互相争夺注意力的主线分别是 B 站频道、现金流与求职、独立产品副线。
 - 每个节点都有 `status`、`current_priority`、`target_completion_date`；示例阶段目标为「在 9 月前发布 3 条视频，同时稳住现金流」。数据通过当前用户 `user_id` 写入，可由「清空全部」重置。
-- 在固定 2026-08-10 参考时间下，三条顶层主线的 direct / branch / cultivation 约为：内容 `67 / 71 / 67`，现金流 `83 / 83 / 64`，副线 `8 / 40 / 53`；三个视觉通道在示例树上有明显差异。树的视觉和交互实现未改。
+- 在固定 2026-08-10 参考时间下，三条顶层主线的 direct / branch / cultivation 约为：内容 `67 / 71 / 67`，现金流 `83 / 83 / 64`，副线 `8 / 40 / 53`；三个视觉通道在示例树上有明显差异。当前树画布视觉修正见下方专节，交互层保持原有实现。
 
 ### 周回顾与模型
 
@@ -29,11 +29,18 @@
 - `useChat.injectReviewMessage` 先用 `reviewFormat.js` 解析，再序列化为无 emoji 文本；`reviewFormat.js` 对历史 emoji 数据的清洗保留。对话注入和 Review 视图共用同一解析契约。
 - `server/agent.js` 的 Agent 请求恢复 `temperature: 0.3`，保留 `deepseek-v4-flash`、`reasoning_effort: max` 和 `max_tokens: 16000`。
 
+### 树画布视觉精修
+
+- `TreeView.jsx` 的 direct glow 在晨纸与林夜都使用节点自身的 `__displayColor`；晨纸只保留 `0.58` opacity 折减，年轮通道保持独立。
+- `render/labels.js` 按下一层水平间距的约一半计算像素宽度上限，保留最多两行与省略号；碰撞索引只检查当前深度及相邻深度。
+- 标签沿枝干末端切线方向做 `t=0.88`、8px 的非旋转锚点偏移，并纳入同一碰撞布局。真实组件浏览器验证覆盖双主题、22 个标签、缩放、平移、展开/折叠和拖拽预览，未发现标签碰撞或布局抖动；探索性实现保留。
+
 ## 验证
 
-- `npm test`：53/53 通过。
+- `npm test`：58/58 通过。
 - `npm run lint`：0 error，5 个既有 exhaustive-deps warning（`useChat.js` / `useWeeklyReview.js`）。
 - `npm run build`：通过；保留既有 runtime-config 非 module 提示和大 chunk warning。
+- 额外性能抽样：500 个合成节点的标签布局约 8.38ms，未做全树碰撞扫描。
 
 ## 禁改边界
 
@@ -42,12 +49,4 @@
 
 ## 下一步
 
-用户已验收并授权发布。2026-08-11 使用 `scripts/deploy-ecs.sh --full` 成功发布到 `focus.buzzegg.cn`：
-
-- 前端 `dist`、`server/` 和生产依赖已同步，`focustree.service` 已重启并保持 active。
-- 部署脚本自带 `/health 200` 通过；随后 `npm run cloud:smoke -- https://focus.buzzegg.cn --require-readiness` 全部通过（health、readiness、runtime config、首页、SPA fallback）。
-- 浏览器 canary 加载登录页成功，HTTP 200、页面 readyState complete、标题「专注树」、关键登录/注册文案和截图均正常；本次未使用账户执行认证后流程。
-- 首次 readiness 检查曾短暂返回 `priority_analysis_runs` 503，立即重跑已恢复 200，当前数据库表检查全部通过。
-- 远端 `npm ci --omit=dev` 报告 5 个既有依赖漏洞（1 low、1 moderate、1 high、2 critical），未在发布中自动修复。
-
-当前线上已可用，等待用户验收；本次未新增 commit，交接文档和部署报告仍保持未提交状态。
+等待用户验收本轮树画布视觉精修。`.codex-task.md` 与临时浏览器实验文件已删除；本轮未新增 commit、未部署。

@@ -27,6 +27,35 @@ test('moves a later same-level label down until its estimated box clears the ear
   assert.ok(second.top >= first.bottom + 4)
 })
 
+test('caps long label boxes at the available pixel width and keeps the ellipsis', () => {
+  const positions = layoutLabelPositions([
+    { depth: 1, x: 0, y: 100, data: { id: 'long', type: 'project', name: '现金流与求职以及回款计划安排' } },
+  ], {
+    getRadius: () => 16,
+    getMaxWidth: () => 96,
+  })
+  const position = positions.get('long')
+
+  assert.ok(position.width <= 96)
+  assert.equal(position.lines.length, 2)
+  assert.match(position.lines.at(-1), /…$/)
+})
+
+test('moves a label down when it collides with an adjacent depth label', () => {
+  const positions = layoutLabelPositions([
+    { depth: 1, x: 0, y: 100, data: { id: 'parent', type: 'project', name: '第一层标签' } },
+    { depth: 2, x: 12, y: 100, data: { id: 'child', type: 'project', name: '第二层标签' } },
+  ], {
+    getRadius: () => 16,
+    getMaxWidth: () => 96,
+  })
+  const parent = positions.get('parent')
+  const child = positions.get('child')
+
+  assert.ok(child.y > 0)
+  assert.ok(child.top >= parent.bottom + 4)
+})
+
 test('tree labels no longer expose a numeric score layer', () => {
   const treeSource = readFileSync(new URL('../src/components/Tree/TreeView.jsx', import.meta.url), 'utf8')
   const controlsSource = readFileSync(new URL('../src/components/Tree/CanvasControls.jsx', import.meta.url), 'utf8')
@@ -40,7 +69,8 @@ test('tree label styles keep the serif/sans hierarchy and thinner done treatment
   const treeSource = readFileSync(new URL('../src/components/Tree/TreeView.jsx', import.meta.url), 'utf8')
   assert.match(labelsSource, /fontFamily: 'var\(--ft-font-serif\)'[\s\S]*fontSize: 16[\s\S]*fontWeight: 500/)
   assert.match(labelsSource, /fontFamily: 'var\(--ft-font-sans\)'[\s\S]*fontSize: 12\.5[\s\S]*fontWeight: 400/)
-  assert.match(labelsSource, /const x = radius \+ 12/)
+  assert.match(labelsSource, /const x = radius \+ 12 \+ anchorX/)
+  assert.match(treeSource, /branchTangent\([\s\S]*LABEL_TANGENT_T/)
   assert.match(treeSource, /\.attr\('stroke-width', 2\)/)
   assert.match(treeSource, /node-label.*is-done/)
 })
