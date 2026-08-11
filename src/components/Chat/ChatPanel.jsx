@@ -220,10 +220,8 @@ export default function ChatPanel({
   messages, isLoading, onSend, isOpen,
   onClearGoal,
   onResetConversation,
-  onOpenHistory, onOpenLearned, onOpenRecommendations,
-  hitRate,
+  onOpenHistory, onOpenLearned,
   treeData, onHoverNode, onSelectNode,
-  onTriggerReview, reviewGenerating,
   onRetry,
   onCancel, pendingQueueCount,
   userGoal, onApplyDraftPlan, onApplyPriorityAnalysis,
@@ -331,30 +329,6 @@ export default function ChatPanel({
       <div className="ft-chat-header">
         <span className="ft-chat-title">Focus Agent</span>
         <div className="ft-chat-header-actions">
-          {onTriggerReview && (
-            <button
-              onClick={onTriggerReview}
-              disabled={reviewGenerating}
-              title="生成本周回顾"
-              className="text-[11px] ft-chat-text-tertiary ft-chat-hover-text-accent transition-colors disabled:opacity-50"
-            >
-              {reviewGenerating ? '回顾中…' : '回顾'}
-            </button>
-          )}
-          {onOpenRecommendations && (
-            <button
-              onClick={onOpenRecommendations}
-              title={hitRate?.total ? `命中率 ${Math.round((hitRate.completed/hitRate.total)*100)}%` : 'AI 推荐记录'}
-              className="text-[11px] ft-chat-text-tertiary ft-chat-hover-text-secondary transition-colors flex items-center gap-1"
-            >
-              推荐
-              {hitRate?.total > 0 && (
-                <span className="text-[10px] ft-chat-text-accent">
-                  {Math.round((hitRate.completed / hitRate.total) * 100)}%
-                </span>
-              )}
-            </button>
-          )}
           {onOpenHistory && (
             <button
               onClick={onOpenHistory}

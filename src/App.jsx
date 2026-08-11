@@ -204,7 +204,10 @@ export default function App() {
   }, [])
 
   const toggleDrawer = useCallback(() => setDrawerOpen(open => !open), [])
-  const openModal = useCallback(kind => setUtilityModal(kind), [])
+  const openModal = useCallback(kind => {
+    if (kind === 'recommendations') reloadRecommendations()
+    setUtilityModal(kind)
+  }, [reloadRecommendations])
   const closeModal = useCallback(() => setUtilityModal(null), [])
 
   const handleGoalEdit = useCallback(() => {
@@ -316,15 +319,11 @@ export default function App() {
       onResetConversation={resetConversation}
       onOpenHistory={() => openModal('history')}
       onOpenLearned={() => openModal('memory')}
-      onOpenRecommendations={() => { reloadRecommendations(); openModal('recommendations') }}
       onApplyDraftPlan={(messageId, actions) => applyDraftPlan(messageId, treeData, actions)}
       onApplyPriorityAnalysis={(messageId, overrides) => handleApplyPriority(messageId, overrides, treeData)}
-      hitRate={hitRate}
       treeData={treeData}
       onHoverNode={setHighlightedNodeId}
       onSelectNode={handleNodeSelect}
-      onTriggerReview={() => weeklyReview.generate({ silent: false })}
-      reviewGenerating={weeklyReview.generating}
       onRetry={() => retryLastMessage(treeData, { selectedNodeId })}
       onCancel={cancelRequest}
       pendingQueueCount={pendingQueue.length}
