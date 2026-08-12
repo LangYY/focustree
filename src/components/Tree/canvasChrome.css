@@ -37,7 +37,7 @@
 @keyframes ft-spin { to { transform: rotate(360deg); } }
 .ft-today-card { position: absolute; top: 42px; left: 0; width: 300px; padding: 14px; border: 1px solid var(--ft-border); border-radius: var(--ft-radius-lg); background: var(--ft-surface-raised); box-shadow: var(--ft-shadow-lg); animation: ft-float-in var(--ft-dur-2) var(--ft-ease-settle); }
 .ft-today-head { display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--ft-border-subtle); }
-.ft-today-head h2 { margin: 2px 0 0; color: var(--ft-text-primary); font: 400 var(--ft-text-lg)/1.4 var(--ft-font-serif); }
+.ft-today-head h2 { margin: 2px 0 0; color: var(--ft-text-primary); font: 400 var(--ft-text-lg)/1.4 var(--ft-font-sans); }
 .ft-eyebrow { color: var(--ft-accent); font: 500 var(--ft-text-2xs)/1 var(--ft-font-mono); letter-spacing: .12em; }
 .ft-today-head-actions { display: flex; gap: 3px; }
 .ft-today-head-actions button, .ft-task-remove { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--ft-radius-sm); background: transparent; color: var(--ft-text-tertiary); cursor: pointer; }

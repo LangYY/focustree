@@ -14,6 +14,8 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --ft-canvas: #0B0F0C;
+  /* 树标签与画布的分离：深底上用暗影，见 index.css 的 .node-label */
+  --ft-label-halo: rgba(0, 0, 0, .82);
   --ft-surface: #111611;
   --ft-surface-raised: #171E17;
   --ft-surface-sunken: #0D120D;
@@ -43,6 +45,8 @@
 [data-theme="light"] {
   color-scheme: light;
   --ft-canvas: #F3F0E7;
+  /* 浅底上文字是深色，分离靠画布色柔光而不是暗影 */
+  --ft-label-halo: rgba(243, 240, 231, .95);
   --ft-surface: #FAF8F2;
   --ft-surface-raised: #FFFFFF;
   --ft-surface-sunken: #EDEAE0;
@@ -71,7 +75,6 @@
 
 :root {
   --ft-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans SC", sans-serif;
-  --ft-font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", Georgia, "SimSun", serif;
   --ft-font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --ft-text-2xs: 10px;
   --ft-text-xs: 11px;

@@ -78,10 +78,6 @@ select:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
-.ft-serif {
-  font-family: var(--ft-font-serif);
-}
-
 @keyframes ft-grow-line {
   0% { transform: scaleX(.08); transform-origin: left; opacity: .35; }
   55% { transform: scaleX(1); transform-origin: left; opacity: 1; }

@@ -114,7 +114,7 @@
 .ft-shortcut-scrim { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--ft-overlay-scrim); }
 .ft-shortcut-dialog { width: min(440px, 100%); padding: 20px; border: 1px solid var(--ft-border); border-radius: var(--ft-radius-lg); background: var(--ft-surface-raised); box-shadow: var(--ft-shadow-lg); color: var(--ft-text-primary); animation: ft-float-in var(--ft-dur-2) var(--ft-ease-settle); }
 .ft-shortcut-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--ft-border-subtle); }
-.ft-shortcut-head h2 { margin: 0; font: 500 var(--ft-text-lg)/1.3 var(--ft-font-serif); }
+.ft-shortcut-head h2 { margin: 0; font: 500 var(--ft-text-lg)/1.3 var(--ft-font-sans); }
 .ft-shortcut-head button { min-height: 32px; padding: 0 9px; border-radius: var(--ft-radius-sm); background: transparent; color: var(--ft-text-secondary); cursor: pointer; }
 .ft-shortcut-head button:hover { background: var(--ft-surface-hover); color: var(--ft-text-primary); }
 .ft-shortcut-list { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 0; }

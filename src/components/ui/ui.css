@@ -132,7 +132,7 @@
 .ft-empty-state h1 {
   margin: var(--ft-space-3) 0 var(--ft-space-1);
   color: var(--ft-text-primary);
-  font: 400 var(--ft-text-2xl)/1.3 var(--ft-font-serif);
+  font: 400 var(--ft-text-2xl)/1.3 var(--ft-font-sans);
 }
 
 .ft-empty-state p {

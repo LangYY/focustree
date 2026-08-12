@@ -1,61 +1,28 @@
-export const LABEL_MAX_CHARS_PER_LINE = 11
-export const LABEL_MAX_LINES = 2
 export const LABEL_VERTICAL_GAP = 4
+// 标签坐在节点正上方，这是文字基线到节点圆心的最小距离（再加上半径）。
+export const LABEL_ABOVE_GAP = 9
+// 单行文字的包围盒相对基线的上下分配：基线以上约 0.78 个行高，以下留出降部。
+const ASCENT_RATIO = 0.78
 
-export function splitLabelLines(
-  value,
-  maxCharsPerLine = LABEL_MAX_CHARS_PER_LINE,
-  maxWidth = Number.POSITIVE_INFINITY,
-  fontSize = 16,
-) {
+export function truncateLabel(value, maxWidth = Number.POSITIVE_INFINITY, fontSize = 16) {
   const text = String(value ?? '').trim()
-  if (!text) return ['']
+  if (!text) return ''
+  const limit = Number(maxWidth)
+  if (!Number.isFinite(limit) || estimateTextWidth(text, fontSize) <= limit) return text
 
-  const maxChars = Math.max(1, Number(maxCharsPerLine) || LABEL_MAX_CHARS_PER_LINE)
-  const widthLimit = Number.isFinite(Number(maxWidth))
-    ? Math.max(Number(fontSize) || 16, Number(maxWidth))
-    : Number.POSITIVE_INFINITY
   const chars = Array.from(text)
-  const lines = []
-
-  let cursor = 0
-  while (cursor < chars.length && lines.length < LABEL_MAX_LINES) {
-    const line = []
-    while (cursor < chars.length && line.length < maxChars) {
-      const next = [...line, chars[cursor]].join('')
-      if (line.length && estimateTextWidth(next, fontSize) > widthLimit) break
-      line.push(chars[cursor])
-      cursor += 1
-    }
-    if (!line.length) {
-      line.push(chars[cursor])
-      cursor += 1
-    }
-    lines.push(line.join(''))
-  }
-
-  if (cursor < chars.length) {
-    const lastIndex = lines.length - 1
-    const lastLine = Array.from(lines[lastIndex] || '')
-    while (
-      lastLine.length > 0 &&
-      estimateTextWidth(`${lastLine.join('')}…`, fontSize) > widthLimit
-    ) {
-      lastLine.pop()
-    }
-    lines[lastIndex] = `${lastLine.slice(0, Math.max(0, maxChars - 1)).join('')}…`
-  }
-
-  return lines
+  while (chars.length > 1 && estimateTextWidth(`${chars.join('')}…`, fontSize) > limit) chars.pop()
+  return `${chars.join('')}…`
 }
 
 export function labelStyle(node) {
   const type = node?.data?.type || node?.type
+  // 字族全应用统一，层级只由字号和字重区分。
   if (type === 'project' || type === 'category') {
     return {
-      fontFamily: 'var(--ft-font-serif)',
-      fontSize: 16,
-      fontWeight: 500,
+      fontFamily: 'var(--ft-font-sans)',
+      fontSize: 15,
+      fontWeight: 600,
       lineHeight: 20,
     }
   }
@@ -71,13 +38,14 @@ export function layoutLabelPositions(nodes, {
   getRadius = () => 0,
   shouldShow = () => true,
   getMaxWidth = () => Number.POSITIVE_INFINITY,
-  getAnchorOffset = () => ({ x: 0, y: 0 }),
 } = {}) {
   const positions = new Map()
   const occupiedByDepth = new Map()
+  // 标签在节点上方，发生碰撞时只能继续往上让。从画布最下方开始放置，
+  // 后放的标签永远是往已放置的那些之上躲，不会反过来把它们推开。
   const visibleNodes = nodes
     .filter(node => node?.data?.type !== 'root' && shouldShow(node))
-    .sort((a, b) => (a.x || 0) - (b.x || 0) || (a.depth || 0) - (b.depth || 0))
+    .sort((a, b) => (b.x || 0) - (a.x || 0) || (a.depth || 0) - (b.depth || 0))
 
   visibleNodes.forEach(node => {
     const data = node.data || node
@@ -86,19 +54,18 @@ export function layoutLabelPositions(nodes, {
     const maxWidth = Number.isFinite(requestedMaxWidth)
       ? Math.max(style.fontSize, requestedMaxWidth)
       : Number.POSITIVE_INFINITY
-    const lines = splitLabelLines(data.name, LABEL_MAX_CHARS_PER_LINE, maxWidth, style.fontSize)
+    const text = truncateLabel(data.name, maxWidth, style.fontSize)
     const radius = Number(getRadius(node)) || 0
-    const anchorOffset = getAnchorOffset(node, style) || {}
-    const anchorX = Number(anchorOffset.x) || 0
-    const anchorY = Number(anchorOffset.y) || 0
-    const x = radius + 12 + anchorX
-    const width = Math.max(...lines.map(line => estimateTextWidth(line, style.fontSize)), style.fontSize)
-    const height = lines.length * style.lineHeight
-    const baseTop = (node.x || 0) + anchorY - height / 2
-    const left = (node.y || 0) + x
-    const depth = node.depth || 0
-    let offset = 0
 
+    const width = Math.max(estimateTextWidth(text, style.fontSize), style.fontSize)
+    const height = style.lineHeight
+    const baseline = -(radius + LABEL_ABOVE_GAP)
+    const left = node.y || 0
+    const right = left + width
+    const depth = node.depth || 0
+    const baseTop = (node.x || 0) + baseline - height * ASCENT_RATIO
+
+    let offset = 0
     while (true) {
       const top = baseTop + offset
       const bottom = top + height
@@ -106,26 +73,26 @@ export function layoutLabelPositions(nodes, {
       for (let candidateDepth = depth - 1; candidateDepth <= depth + 1 && !collision; candidateDepth += 1) {
         const candidates = occupiedByDepth.get(candidateDepth) || []
         collision = candidates.find(other => (
-          left < other.right && left + width > other.left &&
+          left < other.right && right > other.left &&
           top < other.bottom + LABEL_VERTICAL_GAP && bottom > other.top - LABEL_VERTICAL_GAP
         ))
       }
       if (!collision) break
-      offset = Math.max(offset, collision.bottom + LABEL_VERTICAL_GAP - baseTop)
+      offset = Math.min(offset, collision.top - LABEL_VERTICAL_GAP - (baseTop + height))
     }
 
     const position = {
-      x,
-      y: anchorY + offset,
+      x: 0,
+      y: baseline + offset,
       width,
       height,
-      lines,
+      text,
       lineHeight: style.lineHeight,
       fontFamily: style.fontFamily,
       fontSize: style.fontSize,
       fontWeight: style.fontWeight,
       left,
-      right: left + width,
+      right,
       top: baseTop + offset,
       bottom: baseTop + offset + height,
     }

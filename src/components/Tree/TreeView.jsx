@@ -8,7 +8,7 @@ import {
   isUrgentPriority,
 } from '../../lib/treeUtils'
 import { resolveBranchBaseColor, shadeBranchColor } from '../../lib/branchPalette'
-import { branchPath, branchTangent, centerLinePath } from './render/branchPath'
+import { branchPath, centerLinePath } from './render/branchPath'
 import { branchWidth, glowMetrics, nodeAriaLabel, nodeRadius } from './render/nodeVisual'
 import { ringValues } from './render/growthRings'
 import { dueArcPath, dueColor } from './render/dueArc'
@@ -20,11 +20,8 @@ import CanvasControls from './CanvasControls'
 const MARGIN = { top: 20, right: 120, bottom: 20, left: 60 }
 const NODE_H_GAP = 220
 const NODE_V_GAP = 48
-const LABEL_MAX_WIDTH_RATIO = 0.5
-const LABEL_TANGENT_T = 0.88
-const LABEL_TANGENT_DISTANCE = 8
-const LABEL_BACKDROP_PADDING = 3
-const LABEL_BACKDROP_OPACITY = { light: .42, dark: .34 }
+// 标签在节点上方铺开，不再和右侧的下一层抢横向空间，因此可以比旧的两行版宽得多。
+const LABEL_MAX_WIDTH_RATIO = 0.85
 const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
@@ -450,14 +447,6 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
         const layerGap = Number.isFinite(measuredGap) && measuredGap > 0 ? measuredGap : NODE_H_GAP
         return layerGap * LABEL_MAX_WIDTH_RATIO
       },
-      getAnchorOffset: nodeItem => {
-        if (!nodeItem.parent) return { x: 0, y: 0 }
-        const tangent = branchTangent({ source: nodeItem.parent, target: nodeItem }, LABEL_TANGENT_T)
-        return {
-          x: tangent.x * LABEL_TANGENT_DISTANCE,
-          y: tangent.y * LABEL_TANGENT_DISTANCE,
-        }
-      },
     })
     const terminalLinks = links.filter(d =>
       d.target.data.type !== 'root' &&
@@ -821,49 +810,21 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .attr('stroke-linecap', 'round')
       .attr('opacity', d => d.__dueState?.state === 'overdue' ? .85 : .72)
 
-    // 标签：顶层用衬线，末端用无衬线；分数只在检视卡显示。
-    node.filter(d => labelPositions.has(d.data.id))
-      .append('rect')
-      .attr('class', 'node-label-backdrop')
-      .attr('x', d => labelPositions.get(d.data.id).x - LABEL_BACKDROP_PADDING)
-      .attr('y', d => {
-        const position = labelPositions.get(d.data.id)
-        return position.y - position.height / 2 - LABEL_BACKDROP_PADDING
-      })
-      .attr('width', d => labelPositions.get(d.data.id).width + LABEL_BACKDROP_PADDING * 2)
-      .attr('height', d => labelPositions.get(d.data.id).height + LABEL_BACKDROP_PADDING * 2)
-      .attr('rx', d => (labelPositions.get(d.data.id).height + LABEL_BACKDROP_PADDING * 2) / 2)
-      .attr('fill', 'var(--ft-surface-hover)')
-      .attr('opacity', d => previousById.has(d.data.id) ? LABEL_BACKDROP_OPACITY[theme] : 0)
-      .attr('pointer-events', 'none')
-
+    // 标签：单行、坐在节点正上方，避开右侧的出枝方向；分数只在检视卡显示。
     node.filter(d => labelPositions.has(d.data.id))
       .append('text')
       .attr('class', d => `node-label ${d.data.status === 'done' ? 'is-done' : ''}`)
       .attr('x', d => labelPositions.get(d.data.id).x)
       .attr('y', d => labelPositions.get(d.data.id).y)
+      .attr('text-anchor', 'start')
       .attr('fill', 'var(--ft-text-primary)')
       .attr('font-family', d => labelPositions.get(d.data.id).fontFamily)
       .attr('font-size', d => labelPositions.get(d.data.id).fontSize)
       .attr('font-weight', d => labelPositions.get(d.data.id).fontWeight)
-      .attr('paint-order', 'stroke fill')
-      .attr('stroke', 'var(--ft-canvas)')
-      .attr('stroke-width', 2)
-      .attr('stroke-linejoin', 'round')
       .attr('pointer-events', 'auto')
       .attr('opacity', d => previousById.has(d.data.id) ? 1 : 0)
       .style('cursor', 'pointer')
-      .each(function (d) {
-        const position = labelPositions.get(d.data.id)
-        const text = d3.select(this)
-        const firstDy = -((position.lines.length - 1) * position.lineHeight) / 2
-        position.lines.forEach((line, index) => {
-          text.append('tspan')
-            .attr('x', position.x)
-            .attr('dy', index === 0 ? firstDy : position.lineHeight)
-            .text(line)
-        })
-      })
+      .text(d => labelPositions.get(d.data.id).text)
       .on('click', (event, d) => {
         event.stopPropagation()
         setContextMenu(null)
@@ -880,13 +841,6 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .duration(motionDuration(220))
       .ease(d3.easeCubicOut)
       .attr('opacity', 1)
-
-    node.selectAll('.node-label-backdrop')
-      .transition()
-      .delay(motionDuration(420))
-      .duration(motionDuration(220))
-      .ease(d3.easeCubicOut)
-      .attr('opacity', LABEL_BACKDROP_OPACITY[theme])
 
     node
       .transition()

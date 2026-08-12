@@ -23,3 +23,16 @@
   pointer-events: none;
   user-select: none;
 }
+
+/* 标签移到节点上方后，不再落在向右延伸的 .node-hit-area 里，靠自己接收点击。
+   它的 click/dblclick 绑在 TreeView 的 text 上。 */
+.node text.node-label {
+  pointer-events: auto;
+}
+
+/* 标签压在枝干上时的可读性。不用 paint-order 描边：2px 描边会在字形外侧留一圈
+   画布色轮廓，中文小字号笔画间距只有 1-2px，那圈轮廓会糊进笔画空隙，看起来像给
+   每个字加了边框。改用贴合字形的柔光，深色主题是暗影、浅色主题是画布色柔光。 */
+.node-label {
+  filter: drop-shadow(0 1px 1.5px var(--ft-label-halo)) drop-shadow(0 0 2.5px var(--ft-label-halo));
+}
