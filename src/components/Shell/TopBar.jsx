@@ -62,7 +62,6 @@ export default function TopBar({
                   options={[
                     { value: 'dark', label: '深色', icon: Moon },
                     { value: 'light', label: '浅色', icon: Sun },
-                    { value: 'system', label: '系统' },
                   ]}
                 />
                 <div className="ft-menu-divider" />

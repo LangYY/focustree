@@ -19,7 +19,7 @@ import { useBackup } from './hooks/useBackup'
 import { useOnboarding } from './hooks/useOnboarding.js'
 import { DEFAULT_PROJECT_COLOR } from './lib/branchPalette'
 import { EXAMPLE_GOAL } from './lib/exampleData.js'
-import { getDerivedWeightMeta, getDerivedWeightMetaMap } from './lib/treeUtils'
+import { flattenTree, getDerivedWeightMeta, getDerivedWeightMetaMap } from './lib/treeUtils'
 import { restoreAuthSession } from './lib/authSession'
 
 const DELETE_CONFIRM_SHARE = 0.7
@@ -43,7 +43,8 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState(null)
   const [inspectorFocusId, setInspectorFocusId] = useState(null)
   const [layers, setLayers] = useState(() => readLayers())
-  const [themeMode, setThemeMode] = useState(() => localStorage.getItem('ft_theme') || 'dark')
+  // 只有深色和浅色两种；旧的 'system' 存量值在这里一并归到深色。
+  const [themeMode, setThemeMode] = useState(() => localStorage.getItem('ft_theme') === 'light' ? 'light' : 'dark')
   const [resolvedTheme, setResolvedTheme] = useState(() => localStorage.getItem('ft_theme') === 'light' ? 'light' : 'dark')
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [authError, setAuthError] = useState('')
@@ -61,16 +62,8 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('ft_theme', themeMode)
-    const media = window.matchMedia('(prefers-color-scheme: light)')
-    const apply = () => {
-      const nextTheme = themeMode === 'system' ? (media.matches ? 'light' : 'dark') : themeMode
-      document.documentElement.dataset.theme = nextTheme
-      setResolvedTheme(nextTheme)
-    }
-    apply()
-    if (themeMode !== 'system') return undefined
-    media.addEventListener?.('change', apply)
-    return () => media.removeEventListener?.('change', apply)
+    document.documentElement.dataset.theme = themeMode
+    setResolvedTheme(themeMode)
   }, [themeMode])
 
   useEffect(() => {
@@ -171,12 +164,23 @@ export default function App() {
     recentSummaries, injectReviewMessage,
     applyPriorityAnalysis, requestPriorityAnalysis, applyDraftPlan,
   } = useChat(user, treeActions, goal)
+  // 载入示例数据会先删光当前用户的全部节点，且不进撤销栈。树非空时必须显式确认，
+  // 并先留一份可恢复的快照——否则「重新看一遍引导」这种无害操作会直接抹掉真实数据。
   const loadExample = useCallback(async () => {
+    const existing = countUserNodes(treeData)
+    if (existing > 0) {
+      const confirmed = window.confirm(
+        `载入示例数据会先删除你现在的 ${existing} 个节点，并且无法撤销。\n\n`
+        + '继续前会自动存一份备份，可在「数据备份」里恢复。\n\n确定要继续吗？',
+      )
+      if (!confirmed) return false
+      await backupRef.current?.preDestructiveBackup?.('载入示例数据前')
+    }
     const loaded = await loadExampleData()
     if (!loaded) return false
     const savedGoal = await setGoal(EXAMPLE_GOAL.text, EXAMPLE_GOAL)
     return Boolean(savedGoal)
-  }, [loadExampleData, setGoal])
+  }, [loadExampleData, setGoal, treeData])
   const onboarding = useOnboarding({
     user,
     treeData,
@@ -405,6 +409,12 @@ function useGuardedDelete(deleteNode, treeData, goal, backupRef) {
     if (getDeleteRisk(node, treeData, goal).shouldConfirm) await backupRef.current?.preDestructiveBackup?.('删除子树前')
     return deleteNode(nodeId)
   }, [backupRef, deleteNode, goal, treeData])
+}
+
+// 根节点是容器不是用户内容，统计时排除。
+function countUserNodes(tree) {
+  if (!tree) return 0
+  return flattenTree(tree).filter(node => node?.type !== 'root').length
 }
 
 function readLayers() {

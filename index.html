@@ -16,10 +16,8 @@
         var LIGHT = '#F3F0E7'
         var theme = 'dark'
         try {
-          var mode = localStorage.getItem('ft_theme') || 'dark'
-          if (mode === 'system') {
-            theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-          } else if (mode === 'light') {
+          // 只有深色和浅色；旧的 'system' 存量值归到深色，与 App.jsx 的读取保持一致。
+          if (localStorage.getItem('ft_theme') === 'light') {
             theme = 'light'
           }
         } catch (error) {
