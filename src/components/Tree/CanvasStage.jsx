@@ -3,7 +3,7 @@ import Legend from './Legend'
 import TodayPill from './TodayPill'
 import TreeView from './TreeView'
 import { ONBOARDING_STEPS } from '../../lib/onboarding.js'
-import { OnboardingDecision } from '../Onboarding/Onboarding.jsx'
+import { OnboardingDecision, OnboardingReading, OnboardingWelcome } from '../Onboarding/Onboarding.jsx'
 
 export default function CanvasStage({
   theme,
@@ -35,7 +35,7 @@ export default function CanvasStage({
     if (onboarding?.active) {
       return (
         <div className="ft-canvas-stage ft-onboarding-empty-canvas">
-          {onboarding.step === ONBOARDING_STEPS.DECISION ? <OnboardingDecision {...onboardingDecisionProps(onboarding)} /> : null}
+          <OnboardingStep onboarding={onboarding} />
         </div>
       )
     }
@@ -66,20 +66,47 @@ export default function CanvasStage({
         onLegendHover={onLegendHover}
       />
       <Legend onHover={onLegendHover} />
-      {onboarding?.active && onboarding.step === ONBOARDING_STEPS.DECISION ? (
+      {onboarding?.active && STAGE_STEPS.has(onboarding.step) ? (
         <div className="ft-onboarding-stage-layer">
-          <OnboardingDecision {...onboardingDecisionProps(onboarding)} />
+          <OnboardingStep onboarding={onboarding} />
         </div>
       ) : null}
     </div>
   )
 }
 
-function onboardingDecisionProps(onboarding) {
-  return {
-    onChooseReal: onboarding.chooseReal,
-    onChooseExample: onboarding.chooseExample,
-    onSkip: onboarding.skip,
-    exampleLoading: onboarding.exampleLoading,
+// 占据画布的三步：介绍产品、讲怎么读树、再让用户选怎么开始。
+const STAGE_STEPS = new Set([
+  ONBOARDING_STEPS.WELCOME,
+  ONBOARDING_STEPS.READING,
+  ONBOARDING_STEPS.DECISION,
+])
+
+function OnboardingStep({ onboarding }) {
+  if (!onboarding?.active) return null
+  if (onboarding.step === ONBOARDING_STEPS.WELCOME) {
+    return <OnboardingWelcome onNext={onboarding.next} onSkip={onboarding.skip} />
   }
+  if (onboarding.step === ONBOARDING_STEPS.READING) {
+    return (
+      <OnboardingReading
+        channelIndex={onboarding.channelIndex}
+        onNext={onboarding.next}
+        onBack={onboarding.back}
+        onSkip={onboarding.skip}
+      />
+    )
+  }
+  if (onboarding.step === ONBOARDING_STEPS.DECISION) {
+    return (
+      <OnboardingDecision
+        onChooseReal={onboarding.chooseReal}
+        onChooseExample={onboarding.chooseExample}
+        onBack={onboarding.back}
+        onSkip={onboarding.skip}
+        exampleLoading={onboarding.exampleLoading}
+      />
+    )
+  }
+  return null
 }

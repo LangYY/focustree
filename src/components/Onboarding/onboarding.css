@@ -28,7 +28,7 @@
   max-width: 620px;
   margin: 0;
   color: var(--ft-text-primary);
-  font: 500 clamp(28px, 4vw, 46px)/1.2 var(--ft-font-serif);
+  font: 500 clamp(28px, 4vw, 46px)/1.2 var(--ft-font-sans);
   letter-spacing: -.02em;
 }
 
@@ -173,7 +173,7 @@
 
 .ft-onboarding-closing {
   color: var(--ft-accent);
-  font-family: var(--ft-font-serif);
+  font-family: var(--ft-font-sans);
 }
 
 .ft-onboarding-stage-layer {
@@ -199,6 +199,93 @@
     transition: none;
     animation: none;
   }
+}
+
+/* ── 开场与「怎么读这棵树」两步 ───────────────────────────── */
+
+.ft-onboarding-seedling {
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--ft-space-5);
+  fill: none;
+  stroke: var(--ft-accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  animation: ft-onboarding-sway 5s var(--ft-ease-settle) infinite;
+}
+
+.ft-onboarding-lede {
+  max-width: 560px;
+  margin: var(--ft-space-5) 0 0;
+  color: var(--ft-text-secondary);
+  font-size: var(--ft-text-md);
+  line-height: 1.75;
+}
+
+.ft-onboarding-meta {
+  margin: var(--ft-space-5) 0 0;
+  color: var(--ft-text-tertiary);
+  font-size: var(--ft-text-xs);
+}
+
+.ft-onboarding-reading .ft-onboarding-channel-title {
+  max-width: 560px;
+  margin: var(--ft-space-5) 0 0;
+  color: var(--ft-text-primary);
+  font: 600 var(--ft-text-xl)/1.4 var(--ft-font-sans);
+}
+
+.ft-onboarding-diagram {
+  width: min(320px, 80vw);
+  height: auto;
+  margin-top: var(--ft-space-3);
+}
+
+.ft-od-branch { fill: none; stroke: var(--ft-accent); stroke-linecap: round; opacity: .85; transition: stroke-width var(--ft-dur-3) var(--ft-ease-out); }
+.ft-od-branch.is-dim { stroke: var(--ft-text-tertiary); opacity: .4; }
+.ft-od-root { fill: var(--ft-text-tertiary); }
+.ft-od-node { fill: var(--ft-accent); transition: r var(--ft-dur-3) var(--ft-ease-out); }
+.ft-od-node.is-dim { fill: var(--ft-text-tertiary); opacity: .55; }
+.ft-od-glow { fill: var(--ft-accent); opacity: .22; }
+.ft-od-ring { fill: none; stroke: var(--ft-text-secondary); stroke-width: 1.4; opacity: .75; }
+.ft-od-ring.is-faint { opacity: .38; }
+
+.ft-onboarding-progress {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--ft-space-5);
+}
+
+.ft-onboarding-progress span {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ft-border-strong);
+  transition: background var(--ft-dur-2) var(--ft-ease-out);
+}
+
+.ft-onboarding-progress span.is-active { background: var(--ft-accent); }
+
+.ft-onboarding-back { justify-content: flex-start; color: var(--ft-text-tertiary); }
+
+.ft-onboarding-textlink {
+  margin-top: var(--ft-space-5);
+  border: 0;
+  background: none;
+  color: var(--ft-text-tertiary);
+  font-size: var(--ft-text-sm);
+  cursor: pointer;
+}
+
+.ft-onboarding-textlink:hover { color: var(--ft-text-secondary); }
+
+@keyframes ft-onboarding-sway {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: rotate(2.5deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ft-onboarding-seedling { animation: none; }
 }
 
 @media (max-width: 640px) {

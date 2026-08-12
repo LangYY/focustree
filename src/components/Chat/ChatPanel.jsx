@@ -366,6 +366,7 @@ export default function ChatPanel({
           onPrefill={setInput}
           onToday={handleOnboardingToday}
           onSkip={onboarding?.skip}
+          onBack={onboarding?.back}
         />
         <ProposalCards
           messages={messages}
