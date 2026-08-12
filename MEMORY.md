@@ -202,3 +202,11 @@ meaningful implementation changes, decisions, experiments, and failed approaches
 - 本地诊断脚本模拟了空闲连接与突发并发：全局 fetch 约 1 秒后已主动释放 idle socket，未复现长时间空闲复用失效连接；人为断开 socket 后 SDK 默认重试成功，底层错误对象为非空 `TypeError: fetch failed`，包含 `UND_ERR_SOCKET` cause。模拟 502 空响应体时得到真实的 `{ message: '' }`，同表立即重试恢复 200。结论是支持偶发上游 HTTP/连接瞬态方向，但不支持把具体根因断言为 stale idle socket。
 - 对公网 `/readiness` 做了 113 次只读 curl 探测，捕获 1 次 HTTP 503 后立即恢复，其他请求 200；受限于不访问生产日志/凭据，未能从该次失败响应确认失败表名。固定表权限/RLS/表存在性没有表现出间歇性证据。
 - `/readiness` 现对每张表增加一次 200ms 延迟的局部重试；两次失败才返回失败，并记录表名、name、code、message、status。`test/readiness.test.js` 覆盖空 message 首次失败后成功，以及连续失败仍保留错误和日志。全量 `npm test` 60/60、lint 0 error（5 个既有 warning）、build 通过；未新增依赖、未 commit、未部署。
+
+---
+
+## 2026-08-12 — 树画布标签胶囊衬底
+
+- 在 `TreeView.jsx` 的现有标签渲染层前增加 `node-label-backdrop` SVG 胶囊：直接复用 `layoutLabelPositions()` 的 `width` / `height`，外扩 3px，`rx` 为总高度一半，填充使用 `--ft-surface-hover`，无边框、投影或指针命中；未改标签定位、宽度上限、跨层碰撞、枝干、辉光或交互层。
+- 真实浏览器对比了方案 A（胶囊 + 现有文字挖空）和方案 B（仅胶囊）：B 在文字压枝干和密集分叉时字符边缘更软，因此保留 A。晨纸/林夜分别采用 `.42` / `.34` opacity；22 个可见标签统一绘制，空旷处未形成卡片感或明显噪音，不升级为条件式枝干相交判断。
+- 真实浏览器校验覆盖双主题、密集标签、缩放、平移、拖拽预览、展开/折叠；胶囊数量与标签一致、`rx`/padding/无描边属性校验通过，标签碰撞数为 0。新增 `test/treeLabelBackground.test.js`；全量 `npm test` 61/61、lint 0 error（5 个既有 warning）、build 通过。未新增依赖、未 commit、未部署。

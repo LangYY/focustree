@@ -23,6 +23,8 @@ const NODE_V_GAP = 48
 const LABEL_MAX_WIDTH_RATIO = 0.5
 const LABEL_TANGENT_T = 0.88
 const LABEL_TANGENT_DISTANCE = 8
+const LABEL_BACKDROP_PADDING = 3
+const LABEL_BACKDROP_OPACITY = { light: .42, dark: .34 }
 const DRAG_THRESHOLD = 4
 const DROP_LABEL_WIDTH = 180
 const DROP_HIT_PADDING = 14
@@ -821,6 +823,21 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
 
     // 标签：顶层用衬线，末端用无衬线；分数只在检视卡显示。
     node.filter(d => labelPositions.has(d.data.id))
+      .append('rect')
+      .attr('class', 'node-label-backdrop')
+      .attr('x', d => labelPositions.get(d.data.id).x - LABEL_BACKDROP_PADDING)
+      .attr('y', d => {
+        const position = labelPositions.get(d.data.id)
+        return position.y - position.height / 2 - LABEL_BACKDROP_PADDING
+      })
+      .attr('width', d => labelPositions.get(d.data.id).width + LABEL_BACKDROP_PADDING * 2)
+      .attr('height', d => labelPositions.get(d.data.id).height + LABEL_BACKDROP_PADDING * 2)
+      .attr('rx', d => (labelPositions.get(d.data.id).height + LABEL_BACKDROP_PADDING * 2) / 2)
+      .attr('fill', 'var(--ft-surface-hover)')
+      .attr('opacity', d => previousById.has(d.data.id) ? LABEL_BACKDROP_OPACITY[theme] : 0)
+      .attr('pointer-events', 'none')
+
+    node.filter(d => labelPositions.has(d.data.id))
       .append('text')
       .attr('class', d => `node-label ${d.data.status === 'done' ? 'is-done' : ''}`)
       .attr('x', d => labelPositions.get(d.data.id).x)
@@ -863,6 +880,13 @@ export default function TreeView({ treeData, theme = 'dark', userGoal, density, 
       .duration(motionDuration(220))
       .ease(d3.easeCubicOut)
       .attr('opacity', 1)
+
+    node.selectAll('.node-label-backdrop')
+      .transition()
+      .delay(motionDuration(420))
+      .duration(motionDuration(220))
+      .ease(d3.easeCubicOut)
+      .attr('opacity', LABEL_BACKDROP_OPACITY[theme])
 
     node
       .transition()
